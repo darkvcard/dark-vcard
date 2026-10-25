@@ -6,19 +6,26 @@ import { CardVisual } from "@/components/site/CardTile";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { useState } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { WaitingForPayment } from "@/components/site/WaitingForPayment";
+import type { Invoice } from "@/lib/payment-types";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
-  head: () => ({ meta: [{ title: "My Dashboard — vCard" }, { name: "description", content: "Your purchased cards and order history." }] }),
+  head: () => ({ meta: [{ title: "My Dashboard — vCard" }, { name: "description", content: "Your purchased cards and crypto payment history." }, { property: "og:title", content: "My Dashboard — vCard" }, { property: "og:description", content: "Your purchased cards and crypto payment history." }, { property: "og:type", content: "website" }, { name: "twitter:card", content: "summary" }] }),
   component: Dashboard,
 });
 
 function Dashboard() {
   const { user } = useAuth();
+  const [paying, setPaying] = useState<Invoice | null>(null);
   const { data: orders = [], isLoading } = useQuery({
     queryKey: ["my-orders", user?.id],
     enabled: !!user,
+    refetchInterval: 8000,
     queryFn: async () => {
-      const { data, error } = await supabase.from("orders").select("*, cards(*)").eq("user_id", user!.id).order("created_at", { ascending: false });
+      if (!user) return [];
+      const { data, error } = await supabase.from("orders").select("*, cards(*), payment_invoices(*)").eq("user_id", user.id).order("created_at", { ascending: false });
       if (error) throw error;
       return data;
     },
@@ -69,8 +76,8 @@ function Dashboard() {
                     <td className="p-3">{o.cards?.card_name ?? "—"}</td>
                     <td className="p-3 font-mono">${Number(o.amount_usd ?? 0).toFixed(2)}</td>
                     <td className="p-3 font-mono">{o.crypto_method}</td>
-                    <td className="max-w-[160px] truncate p-3 font-mono text-xs">{o.transaction_hash}</td>
-                    <td className="p-3"><StatusBadge status={o.status} /></td>
+                    <td className="max-w-[160px] truncate p-3 font-mono text-xs">{o.transaction_hash.startsWith("awaiting-payment:") ? "Awaiting payment" : o.transaction_hash}</td>
+                    <td className="p-3"><div className="flex flex-wrap items-center gap-2"><StatusBadge status={o.status} />{o.status === "pending" && o.payment_invoices && <Button size="sm" variant="terminal" onClick={() => setPaying(o.payment_invoices)}>Payment details</Button>}</div></td>
                   </tr>
                 ))}
               </tbody>
@@ -78,6 +85,7 @@ function Dashboard() {
           </div>
         </section>
       </div>
+      <Dialog open={!!paying} onOpenChange={(open) => !open && setPaying(null)}><DialogContent className="max-h-[90dvh] overflow-y-auto"><DialogHeader><DialogTitle>Order payment</DialogTitle></DialogHeader>{paying && <WaitingForPayment invoice={paying} onDone={() => setPaying(null)} />}</DialogContent></Dialog>
     </Layout>
   );
 }

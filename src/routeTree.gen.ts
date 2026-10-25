@@ -15,6 +15,7 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as ShopRouteImport } from './routes/shop'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
+import { Route as ApiPublicJobsVerifyPaymentsRouteImport } from './routes/api/public/jobs/verify-payments'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -45,6 +46,12 @@ const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const ApiPublicJobsVerifyPaymentsRoute =
+  ApiPublicJobsVerifyPaymentsRouteImport.update({
+    id: '/api/public/jobs/verify-payments',
+    path: '/api/public/jobs/verify-payments',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -52,6 +59,7 @@ export interface FileRoutesByFullPath {
   '/shop': typeof ShopRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/api/public/jobs/verify-payments': typeof ApiPublicJobsVerifyPaymentsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -59,6 +67,7 @@ export interface FileRoutesByTo {
   '/shop': typeof ShopRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/api/public/jobs/verify-payments': typeof ApiPublicJobsVerifyPaymentsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -68,12 +77,25 @@ export interface FileRoutesById {
   '/shop': typeof ShopRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/api/public/jobs/verify-payments': typeof ApiPublicJobsVerifyPaymentsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/shop' | '/admin' | '/dashboard'
+  fullPaths:
+    | '/'
+    | '/auth'
+    | '/shop'
+    | '/admin'
+    | '/dashboard'
+    | '/api/public/jobs/verify-payments'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/shop' | '/admin' | '/dashboard'
+  to:
+    | '/'
+    | '/auth'
+    | '/shop'
+    | '/admin'
+    | '/dashboard'
+    | '/api/public/jobs/verify-payments'
   id:
     | '__root__'
     | '/'
@@ -82,6 +104,7 @@ export interface FileRouteTypes {
     | '/shop'
     | '/_authenticated/admin'
     | '/_authenticated/dashboard'
+    | '/api/public/jobs/verify-payments'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -89,6 +112,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   ShopRoute: typeof ShopRoute
+  ApiPublicJobsVerifyPaymentsRoute: typeof ApiPublicJobsVerifyPaymentsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -135,6 +159,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedDashboardRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/public/jobs/verify-payments': {
+      id: '/api/public/jobs/verify-payments'
+      path: '/api/public/jobs/verify-payments'
+      fullPath: '/api/public/jobs/verify-payments'
+      preLoaderRoute: typeof ApiPublicJobsVerifyPaymentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -156,6 +187,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   ShopRoute: ShopRoute,
+  ApiPublicJobsVerifyPaymentsRoute: ApiPublicJobsVerifyPaymentsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -18,7 +18,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { cardsQuery } from "@/lib/cards";
 
 export const Route = createFileRoute("/_authenticated/admin")({
-  head: () => ({ meta: [{ title: "Admin Panel — vCard" }, { name: "robots", content: "noindex" }] }),
+  head: () => ({ meta: [{ title: "Admin Panel — vCard" }, { name: "description", content: "Manage vCard inventory and payment verification." }, { property: "og:title", content: "Admin Panel — vCard" }, { property: "og:description", content: "Manage vCard inventory and payment verification." }, { property: "og:type", content: "website" }, { name: "twitter:card", content: "summary" }, { name: "robots", content: "noindex" }] }),
   component: Admin,
 });
 
@@ -34,9 +34,10 @@ function Admin() {
         <p className="font-mono text-xs uppercase tracking-widest text-primary">// admin_console</p>
         <h1 className="mt-2 text-3xl font-bold">Admin panel</h1>
         <Tabs defaultValue="orders" className="mt-8">
-          <TabsList><TabsTrigger value="orders">Orders</TabsTrigger><TabsTrigger value="cards">Inventory</TabsTrigger></TabsList>
+          <TabsList><TabsTrigger value="orders">Orders</TabsTrigger><TabsTrigger value="cards">Inventory</TabsTrigger><TabsTrigger value="delivery">Card details</TabsTrigger></TabsList>
           <TabsContent value="orders"><OrdersAdmin /></TabsContent>
           <TabsContent value="cards"><CardsAdmin /></TabsContent>
+          <TabsContent value="delivery"><DeliveryInventory /></TabsContent>
         </Tabs>
       </div>
     </Layout>
@@ -152,14 +153,16 @@ function OrdersAdmin() {
   const { data: orders = [] } = useQuery({
     queryKey: ["admin-orders"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("orders").select("*, cards(card_name)").order("created_at", { ascending: false });
+      const { data, error } = await supabase.from("orders").select("*, cards(card_name), payment_invoices(*)").order("created_at", { ascending: false });
       if (error) throw error;
       return data;
     },
+    refetchInterval: 8000,
   });
   const shown = filter === "all" ? orders : orders.filter((o) => o.status === filter);
 
   const update = async (id: string, status: "completed" | "failed", delivery_details?: string) => {
+    if (status === "completed" && !delivery_details?.trim()) { toast.error("Enter card delivery details before approving."); return; }
     const { error } = await supabase.from("orders").update({ status, ...(delivery_details !== undefined ? { delivery_details } : {}) }).eq("id", id);
     if (error) { toast.error(error.message); return; }
     toast.success(`Order ${status}`);
@@ -183,14 +186,14 @@ function OrdersAdmin() {
               <tr key={o.id} className="border-b border-border/50">
                 <td className="p-3">{new Date(o.created_at).toLocaleString()}</td>
                 <td className="p-3">{o.cards?.card_name ?? "—"}</td>
-                <td className="p-3 font-mono">${Number(o.amount_usd ?? 0).toFixed(2)}</td>
+                <td className="p-3 font-mono">{o.payment_invoices ? `${o.payment_invoices.amount_display} USDT` : `$${Number(o.amount_usd ?? 0).toFixed(2)}`}</td>
                 <td className="p-3 font-mono">{o.crypto_method}</td>
-                <td className="max-w-[180px] break-all p-3 font-mono text-xs">{o.transaction_hash}</td>
+                <td className="max-w-[180px] break-all p-3 font-mono text-xs">{o.transaction_hash.startsWith("awaiting-payment:") ? o.id : o.transaction_hash}{o.payment_invoices?.last_error && <p className="mt-2 text-destructive">Verification unavailable — check provider settings.</p>}</td>
                 <td className="max-w-[140px] break-all p-3 font-mono text-xs">{o.wallet_address ?? "—"}</td>
                 <td className="p-3"><StatusBadge status={o.status} /></td>
                 <td className="whitespace-nowrap p-3 text-right">
-                  <Button size="icon" variant="ghost" title="Approve" onClick={() => setApproving({ id: o.id, details: o.delivery_details ?? "" })}><Check /></Button>
-                  {o.status !== "failed" && <Button size="icon" variant="ghost" title="Mark failed" onClick={() => update(o.id, "failed")}><X /></Button>}
+                  {o.status !== "completed" && <Button size="icon" variant="ghost" title="Approve" onClick={() => setApproving({ id: o.id, details: o.delivery_details ?? "" })}><Check /></Button>}
+                  {o.status === "pending" && <Button size="icon" variant="ghost" title="Mark failed" onClick={() => update(o.id, "failed")}><X /></Button>}
                 </td>
               </tr>
             ))}
@@ -211,4 +214,34 @@ function OrdersAdmin() {
       </Dialog>
     </div>
   );
+}
+
+function DeliveryInventory() {
+  const qc = useQueryClient();
+  const { data: cards = [] } = useQuery(cardsQuery);
+  const { data: units = [] } = useQuery({ queryKey: ["card-units"], queryFn: async () => {
+    const result = await supabase.from("card_units").select("id,card_id,reserved_order_id,delivered_at").order("created_at", { ascending: false });
+    if (result.error) throw result.error;
+    return result.data;
+  } });
+  const [cardId, setCardId] = useState("");
+  const [details, setDetails] = useState("");
+  const [busy, setBusy] = useState(false);
+  const add = async () => {
+    if (!cardId || !details.trim()) { toast.error("Select a card and enter its delivery details."); return; }
+    setBusy(true);
+    const result = await supabase.from("card_units").insert({ card_id: cardId, delivery_details: details.trim() });
+    setBusy(false);
+    if (result.error) { toast.error(result.error.message); return; }
+    setDetails(""); toast.success("Private card added for automatic delivery"); qc.invalidateQueries({ queryKey: ["card-units"] });
+  };
+  return <div className="mt-6 space-y-6">
+    <h2 className="text-xl font-semibold">Private delivery inventory</h2>
+    <div className="max-w-xl space-y-3">
+      <Label>Card product</Label><Select value={cardId} onValueChange={setCardId}><SelectTrigger><SelectValue placeholder="Select card" /></SelectTrigger><SelectContent>{cards.map(c => <SelectItem value={c.id} key={c.id}>{c.card_name}</SelectItem>)}</SelectContent></Select>
+      <Label htmlFor="private-details">One card’s delivery details</Label><Textarea id="private-details" rows={5} className="font-mono" value={details} onChange={e => setDetails(e.target.value)} placeholder="Card number, expiry, CVV, redemption link…" />
+      <Button variant="neon" disabled={busy} onClick={add}><Plus />{busy ? "Saving…" : "Add private card"}</Button>
+    </div>
+    <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b border-border"><th className="p-3 text-left">Product</th><th className="p-3 text-left">Delivery state</th><th className="p-3 text-left">Order ID</th></tr></thead><tbody>{units.map(unit => <tr key={unit.id} className="border-b border-border"><td className="p-3">{cards.find(c => c.id === unit.card_id)?.card_name}</td><td className="p-3">{unit.delivered_at ? "Delivered" : unit.reserved_order_id ? "Reserved" : "Available"}</td><td className="break-all p-3 font-mono text-xs">{unit.reserved_order_id ?? "—"}</td></tr>)}{units.length === 0 && <tr><td colSpan={3} className="p-3 text-muted-foreground">No private cards available for automatic delivery.</td></tr>}</tbody></table></div>
+  </div>;
 }

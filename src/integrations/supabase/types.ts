@@ -14,6 +14,48 @@ export type Database = {
   }
   public: {
     Tables: {
+      card_units: {
+        Row: {
+          card_id: string
+          created_at: string
+          delivered_at: string | null
+          delivery_details: string
+          id: string
+          reserved_order_id: string | null
+        }
+        Insert: {
+          card_id: string
+          created_at?: string
+          delivered_at?: string | null
+          delivery_details: string
+          id?: string
+          reserved_order_id?: string | null
+        }
+        Update: {
+          card_id?: string
+          created_at?: string
+          delivered_at?: string | null
+          delivery_details?: string
+          id?: string
+          reserved_order_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "card_units_card_id_fkey"
+            columns: ["card_id"]
+            isOneToOne: false
+            referencedRelation: "cards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "card_units_reserved_order_id_fkey"
+            columns: ["reserved_order_id"]
+            isOneToOne: true
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cards: {
         Row: {
           card_name: string
@@ -94,6 +136,68 @@ export type Database = {
           },
         ]
       }
+      payment_invoices: {
+        Row: {
+          amount_display: string
+          amount_units: string
+          created_at: string
+          expires_at: string
+          last_checked_at: string | null
+          last_error: string | null
+          memo: string
+          method: string
+          order_id: string
+          paid_at: string | null
+          recipient: string
+          scan_cursor: string | null
+          transaction_ref: string | null
+          user_id: string
+          verification_state: string
+        }
+        Insert: {
+          amount_display: string
+          amount_units: string
+          created_at?: string
+          expires_at?: string
+          last_checked_at?: string | null
+          last_error?: string | null
+          memo: string
+          method: string
+          order_id: string
+          paid_at?: string | null
+          recipient: string
+          scan_cursor?: string | null
+          transaction_ref?: string | null
+          user_id: string
+          verification_state?: string
+        }
+        Update: {
+          amount_display?: string
+          amount_units?: string
+          created_at?: string
+          expires_at?: string
+          last_checked_at?: string | null
+          last_error?: string | null
+          memo?: string
+          method?: string
+          order_id?: string
+          paid_at?: string | null
+          recipient?: string
+          scan_cursor?: string | null
+          transaction_ref?: string | null
+          user_id?: string
+          verification_state?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_invoices_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: true
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           id: string
@@ -117,6 +221,18 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      create_crypto_invoice: {
+        Args: { p_card_id: string; p_method: string; p_user_id: string }
+        Returns: Json
+      }
+      fulfill_crypto_invoice: {
+        Args: {
+          p_order_id: string
+          p_paid_at: string
+          p_transaction_ref: string
+        }
+        Returns: boolean
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]

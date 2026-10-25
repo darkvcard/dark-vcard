@@ -117,6 +117,10 @@
 @keyframes blink { 50% { opacity: 0; } }
 @utility caret { animation: blink 1s step-end infinite; }
 
+.payment-qr { background: var(--foreground); }
+.payment-qr > path:first-child { fill: var(--foreground); }
+.payment-qr > path:last-child { fill: var(--background); }
+
 @layer base {
   * { border-color: var(--color-border); }
   body {
