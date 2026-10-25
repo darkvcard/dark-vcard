@@ -50,13 +50,13 @@ function CardsAdmin() {
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
-    if (!draft?.card_name?.trim()) return toast.error("Card name required");
+    if (!draft?.card_name?.trim()) { toast.error("Card name required"); return; }
     setBusy(true);
     let image_url = draft.image_url ?? null;
     if (draft.file) {
       const path = `${crypto.randomUUID()}-${draft.file.name.replace(/[^a-z0-9.]/gi, "_")}`;
       const up = await supabase.storage.from("card-images").upload(path, draft.file);
-      if (up.error) { setBusy(false); return toast.error(up.error.message); }
+      if (up.error) { setBusy(false); { toast.error(up.error.message); return; } }
       const signed = await supabase.storage.from("card-images").createSignedUrl(path, 60 * 60 * 24 * 365 * 10);
       image_url = signed.data?.signedUrl ?? null;
     }
@@ -70,7 +70,7 @@ function CardsAdmin() {
     };
     const res = draft.id ? await supabase.from("cards").update(row).eq("id", draft.id) : await supabase.from("cards").insert(row);
     setBusy(false);
-    if (res.error) return toast.error(res.error.message);
+    if (res.error) { toast.error(res.error.message); return; }
     toast.success("Saved");
     setDraft(null);
     qc.invalidateQueries({ queryKey: ["cards"] });
@@ -79,13 +79,13 @@ function CardsAdmin() {
   const remove = async (id: string) => {
     if (!confirm("Delete this card?")) return;
     const { error } = await supabase.from("cards").delete().eq("id", id);
-    if (error) return toast.error(error.message);
+    if (error) { toast.error(error.message); return; }
     qc.invalidateQueries({ queryKey: ["cards"] });
   };
 
   const setStock = async (id: string, stock_status: CardRow["stock_status"]) => {
     const { error } = await supabase.from("cards").update({ stock_status }).eq("id", id);
-    if (error) return toast.error(error.message);
+    if (error) { toast.error(error.message); return; }
     qc.invalidateQueries({ queryKey: ["cards"] });
   };
 
@@ -129,7 +129,7 @@ function CardsAdmin() {
                 <div className="space-y-1"><Label>Price (USD)</Label><Input type="number" step="0.01" value={draft.price_in_usd ?? ""} onChange={(e) => setDraft({ ...draft, price_in_usd: Number(e.target.value) })} /></div>
               </div>
               <div className="space-y-1"><Label>Stock</Label>
-                <Select value={draft.stock_status} onValueChange={(v) => setDraft({ ...draft, stock_status: v as CardRow["stock_status"] })}>
+                <Select value={draft.stock_status ?? "in_stock"} onValueChange={(v) => setDraft({ ...draft, stock_status: v as CardRow["stock_status"] })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>{Object.entries(stockLabel).map(([k, l]) => <SelectItem key={k} value={k}>{l}</SelectItem>)}</SelectContent>
                 </Select>
@@ -161,7 +161,7 @@ function OrdersAdmin() {
 
   const update = async (id: string, status: "completed" | "failed", delivery_details?: string) => {
     const { error } = await supabase.from("orders").update({ status, ...(delivery_details !== undefined ? { delivery_details } : {}) }).eq("id", id);
-    if (error) return toast.error(error.message);
+    if (error) { toast.error(error.message); return; }
     toast.success(`Order ${status}`);
     setApproving(null);
     qc.invalidateQueries({ queryKey: ["admin-orders"] });

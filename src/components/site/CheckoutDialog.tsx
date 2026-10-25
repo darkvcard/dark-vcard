@@ -41,7 +41,7 @@ export function CheckoutDialog({ card, onClose }: { card: CardRow | null; onClos
       amount_usd: card.price_in_usd,
     });
     setBusy(false);
-    if (error) return toast.error(error.message);
+    if (error) { toast.error(error.message); return; }
     toast.success("Order submitted — awaiting verification");
     onClose();
     navigate({ to: "/dashboard" });
