@@ -14,3 +14,4 @@
 - Store immutable invoices and private per-card fulfillment units separately from public products; only service-role functions can allocate amounts or fulfill orders atomically.
 - Verify canonical USDT transfers against finalized blockchain evidence and enforce globally unique transaction references in the database; client payment claims cannot complete orders.
 - Provider credentials are optional environment references, never fake values; disabled providers prevent new invoices on that network.
+- BSC transfer discovery uses Etherscan V2 with an explicit chain ID and bounded pagination; independently validate canonical finalized RPC receipts so explorer listings cannot authorize payment alone.
