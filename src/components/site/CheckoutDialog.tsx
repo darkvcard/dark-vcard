@@ -30,7 +30,7 @@ export function CheckoutDialog({ card, onClose }: { card: CardRow | null; onClos
   const submit = async () => {
     if (!card || !user) return;
     const parsed = schema.safeParse({ tx, wallet });
-    if (!parsed.success) return toast.error(parsed.error.issues[0].message);
+    if (!parsed.success) { toast.error(parsed.error.issues[0]?.message ?? "Invalid input"); return; }
     setBusy(true);
     const { error } = await supabase.from("orders").insert({
       user_id: user.id,
