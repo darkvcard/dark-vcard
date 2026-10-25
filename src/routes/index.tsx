@@ -13,7 +13,7 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "vCard — Buy Virtual Debit Cards Anonymously with Crypto" },
-      { name: "description", content: "Privacy-first prepaid virtual Visa & Mastercard cards. Pay with BTC, ETH, USDT. Fast delivery, 24/7 support." },
+      { name: "description", content: "Privacy-first prepaid virtual Visa & Mastercard cards. Pay with USDT on BNB Smart Chain or Solana." },
       { property: "og:title", content: "vCard — Buy Virtual Cards Anonymously" },
       { property: "og:description", content: "Prepaid virtual debit cards paid with crypto. Instant, private, trusted." },
       { property: "og:type", content: "website" },
@@ -25,7 +25,7 @@ export const Route = createFileRoute("/")({
 
 const features = [
   { icon: EyeOff, title: "No KYC hassle", text: "Buy with just an email. Your privacy stays yours." },
-  { icon: Bitcoin, title: "Crypto native", text: "BTC, ETH, USDT and LTC accepted out of the box." },
+  { icon: Bitcoin, title: "Crypto native", text: "Pay with USDT on BNB Smart Chain or Solana." },
   { icon: Zap, title: "Fast delivery", text: "Cards land in your dashboard once payment confirms." },
   { icon: ShieldCheck, title: "On-chain verified", text: "Every order is matched to a real transaction hash." },
   { icon: Globe, title: "Works worldwide", text: "Use for subscriptions, ads, SaaS and online shopping." },
@@ -56,7 +56,7 @@ function Index() {
             <Button variant="terminal" size="lg" asChild><Link to="/auth">Create account</Link></Button>
           </div>
           <div className="mt-14 flex flex-wrap gap-8 font-mono text-sm">
-            {[["12k+", "cards delivered"], ["4", "cryptos accepted"], ["<15m", "avg. delivery"]].map(([n, l]) => (
+            {[["12k+", "cards delivered"], ["2", "USDT networks"], ["<15m", "avg. delivery"]].map(([n, l]) => (
               <div key={l}><p className="text-2xl font-bold text-neon">{n}</p><p className="text-xs uppercase text-muted-foreground">{l}</p></div>
             ))}
           </div>
