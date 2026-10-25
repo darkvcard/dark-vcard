@@ -5,6 +5,8 @@ USDT is accepted on BNB Smart Chain (BEP20) and Solana only. BSC uses canonical 
 ## Credentials
 Configure `BSCSCAN_API_KEY` and `HELIUS_API_KEY` using Lovable's secure secrets form. The code references these environment names but deliberately does not store fake placeholder credentials. BNB Smart Chain uses the Etherscan V2 API with chain ID 56; supply an Etherscan V2 key with BSC access, not a legacy BscScan-only key. Solana uses a Helius mainnet RPC key. Networks remain disabled until their key exists.
 
+The current saved Etherscan key returns "Free API access is not supported for this chain" for BSC. Upgrade to a plan with BSC access before accepting BEP20 payments. Invoice creation probes BSC access and refuses to request funds if the explorer rejects the key. The saved Helius key passed a mainnet health check.
+
 ## Delivery inventory
 In Admin → Card details, add one real prepaid card's delivery details at a time, associated with its product. Each unit is reserved atomically for one invoice and is never exposed in public product reads. No sample card numbers are generated. Checkout is blocked if there is no available delivery unit.
 
