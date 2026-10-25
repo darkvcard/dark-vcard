@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { BSC_USDT, SOLANA_USDT, matchesPayment, type ChainTransfer } from "./payments";
 import type { Invoice } from "./payment-types";
+import { bscScanUrl, bscTransferParams, parseBscScanResponse, parseBscScanTransfers } from "./bscscan";
 
 async function rpc<T>(url: string, method: string, params: unknown[]): Promise<T> {
   const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(12000) });
@@ -10,37 +11,45 @@ async function rpc<T>(url: string, method: string, params: unknown[]): Promise<T
   return body.result;
 }
 
-const transfersSchema = z.object({ cursor: z.string().nullable().optional(), result: z.array(z.object({ transaction_hash: z.string(), block_timestamp: z.string(), block_number: z.string(), value: z.string(), to_address: z.string(), address: z.string() })) });
+async function bscScanRequest(params: Record<string, string>, key: string) {
+  const response = await fetch(bscScanUrl(params, key), { signal: AbortSignal.timeout(12000) });
+  const text = await response.text();
+  if (!response.ok) {
+    // Do not log request URLs: they contain the provider key.
+    console.error(`BscScan / Etherscan [${response.status}]`);
+    throw new Error(`BscScan / Etherscan returned ${response.status}: ${text.split(key).join("[redacted]")}`);
+  }
+  return JSON.parse(text) as unknown;
+}
+const bscCursor = z.object({ start: z.string().regex(/^\d+$/), end: z.string().regex(/^\d+$/), page: z.number().int().positive() });
 const transferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 async function findBscPayment(invoice: Invoice): Promise<{ transfer?: ChainTransfer; cursor: string | null }> {
-  const key = process.env['MORALIS_API_KEY'];
-  if (!key) throw new Error("Moralis is not configured");
-  const url = new URL(`https://deep-index.moralis.io/api/v2.2/${invoice.recipient}/erc20/transfers`);
-  url.searchParams.set("chain", "bsc"); url.searchParams.set("contract_addresses[0]", BSC_USDT);
-  url.searchParams.set("from_date", invoice.created_at); url.searchParams.set("to_date", invoice.expires_at);
-  url.searchParams.set("order", "ASC"); url.searchParams.set("limit", "100");
-  if (invoice.scan_cursor) url.searchParams.set("cursor", invoice.scan_cursor);
-  const response = await fetch(url, { headers: { "X-API-Key": key }, signal: AbortSignal.timeout(12000) });
-  if (!response.ok) { const body = await response.text(); console.error(`Moralis [${response.status}]: ${body}`); throw new Error(`Moralis returned ${response.status}: ${body}`); }
-  const page = transfersSchema.parse(await response.json());
+  const key = process.env['BSCSCAN_API_KEY'];
+  if (!key) throw new Error("BscScan / Etherscan is not configured");
   const rpcUrl = "https://bsc-dataseed.bnbchain.org";
-  const candidates = page.result.filter(t => t.address.toLowerCase() === BSC_USDT && t.to_address.toLowerCase() === invoice.recipient.toLowerCase() && t.value === invoice.amount_units);
-  if (!candidates.length) return { cursor: page.cursor ?? null };
   if (await rpc<string>(rpcUrl, "eth_chainId", []) !== "0x38") throw new Error("Incorrect BSC network");
   const finalized = await rpc<{ number: string } | null>(rpcUrl, "eth_getBlockByNumber", ["finalized", false]);
   if (!finalized) throw new Error("Finalized BSC data unavailable");
+  let cursor = invoice.scan_cursor?.startsWith("{") ? bscCursor.parse(JSON.parse(invoice.scan_cursor)) : null;
+  if (!cursor) {
+    const start = z.string().regex(/^\d+$/).parse(parseBscScanResponse(await bscScanRequest({ module: "block", action: "getblocknobytime", timestamp: String(Math.floor(Date.parse(invoice.created_at) / 1000)), closest: "before" }, key)));
+    cursor = { start, end: BigInt(finalized.number).toString(), page: 1 };
+  }
+  const rows = parseBscScanTransfers(await bscScanRequest(bscTransferParams(invoice.recipient, cursor.start, cursor.end, cursor.page), key));
+  const nextCursor = rows.length === 100 ? JSON.stringify({ ...cursor, page: cursor.page + 1 }) : null;
+  const candidates = rows.filter(t => t.contractAddress.toLowerCase() === BSC_USDT && t.to.toLowerCase() === invoice.recipient.toLowerCase() && t.value === invoice.amount_units);
   for (const candidate of candidates) {
-    if (BigInt(candidate.block_number) > BigInt(finalized.number)) return { cursor: invoice.scan_cursor };
-    const receipt = await rpc<{ status: string; blockNumber: string; blockHash: string; logs: { address: string; topics: string[]; data: string }[] } | null>(rpcUrl, "eth_getTransactionReceipt", [candidate.transaction_hash]);
+    if (BigInt(candidate.blockNumber) > BigInt(finalized.number)) return { cursor: JSON.stringify(cursor) };
+    const receipt = await rpc<{ status: string; blockNumber: string; blockHash: string; logs: { address: string; topics: string[]; data: string }[] } | null>(rpcUrl, "eth_getTransactionReceipt", [candidate.hash]);
     if (!receipt || receipt.status !== "0x1") continue;
-    if (BigInt(receipt.blockNumber) > BigInt(finalized.number)) return { cursor: invoice.scan_cursor };
+    if (BigInt(receipt.blockNumber) > BigInt(finalized.number)) return { cursor: JSON.stringify(cursor) };
     const block = await rpc<{ hash: string; timestamp: string } | null>(rpcUrl, "eth_getBlockByNumber", [receipt.blockNumber, false]);
     if (!block || block.hash !== receipt.blockHash) continue;
     const amount = receipt.logs.filter(log => log.address.toLowerCase() === BSC_USDT && log.topics[0] === transferTopic && log.topics[2]?.toLowerCase() === `0x${invoice.recipient.slice(2).toLowerCase().padStart(64, "0")}`).reduce((sum, log) => sum + BigInt(log.data), 0n);
-    const transfer: ChainTransfer = { asset: BSC_USDT, recipient: invoice.recipient, amountUnits: amount.toString(), timestamp: new Date(Number(BigInt(block.timestamp)) * 1000).toISOString(), successful: true, finalized: true, reference: `bsc:${candidate.transaction_hash.toLowerCase()}` };
-    if (matchesPayment(invoice, transfer)) return { transfer, cursor: page.cursor ?? null };
+    const transfer: ChainTransfer = { asset: BSC_USDT, recipient: invoice.recipient, amountUnits: amount.toString(), timestamp: new Date(Number(BigInt(block.timestamp)) * 1000).toISOString(), successful: true, finalized: true, reference: `bsc:${candidate.hash.toLowerCase()}` };
+    if (matchesPayment(invoice, transfer)) return { transfer, cursor: nextCursor };
   }
-  return { cursor: page.cursor ?? null };
+  return { cursor: nextCursor };
 }
 
 type TokenBalance = { accountIndex: number; mint: string; owner?: string; uiTokenAmount: { amount: string; decimals: number } };
