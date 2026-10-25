@@ -14,16 +14,121 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      cards: {
+        Row: {
+          card_name: string
+          card_type: string
+          created_at: string
+          description: string | null
+          id: string
+          image_url: string | null
+          price_in_usd: number
+          stock_status: Database["public"]["Enums"]["stock_status"]
+        }
+        Insert: {
+          card_name: string
+          card_type?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          image_url?: string | null
+          price_in_usd?: number
+          stock_status?: Database["public"]["Enums"]["stock_status"]
+        }
+        Update: {
+          card_name?: string
+          card_type?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          image_url?: string | null
+          price_in_usd?: number
+          stock_status?: Database["public"]["Enums"]["stock_status"]
+        }
+        Relationships: []
+      }
+      orders: {
+        Row: {
+          amount_usd: number | null
+          card_id: string | null
+          created_at: string
+          crypto_method: string
+          delivery_details: string | null
+          id: string
+          status: Database["public"]["Enums"]["order_status"]
+          transaction_hash: string
+          user_id: string
+          wallet_address: string | null
+        }
+        Insert: {
+          amount_usd?: number | null
+          card_id?: string | null
+          created_at?: string
+          crypto_method: string
+          delivery_details?: string | null
+          id?: string
+          status?: Database["public"]["Enums"]["order_status"]
+          transaction_hash: string
+          user_id: string
+          wallet_address?: string | null
+        }
+        Update: {
+          amount_usd?: number | null
+          card_id?: string | null
+          created_at?: string
+          crypto_method?: string
+          delivery_details?: string | null
+          id?: string
+          status?: Database["public"]["Enums"]["order_status"]
+          transaction_hash?: string
+          user_id?: string
+          wallet_address?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "orders_card_id_fkey"
+            columns: ["card_id"]
+            isOneToOne: false
+            referencedRelation: "cards"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_roles: {
+        Row: {
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "user"
+      order_status: "pending" | "completed" | "failed"
+      stock_status: "in_stock" | "low_stock" | "out_of_stock"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +255,10 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "user"],
+      order_status: ["pending", "completed", "failed"],
+      stock_status: ["in_stock", "low_stock", "out_of_stock"],
+    },
   },
 } as const
