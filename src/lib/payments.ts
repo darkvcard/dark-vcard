@@ -9,7 +9,7 @@ export const PAYMENT_WINDOW_MS = 30 * 60 * 1000;
 export const PAYMENT_POLL_MS = 8000;
 export type PaymentMethod = typeof CRYPTO_METHODS[number]["id"];
 export type PaymentRequest = { method: string; recipient: string; amount_display: string; amount_units: string; memo: string; created_at: string; expires_at: string };
-export type ChainTransfer = { asset: string; recipient: string; amountUnits: string; memo?: string; timestamp: string; successful: boolean; finalized: boolean; reference: string };
+export type ChainTransfer = { asset: string; recipient: string; amountUnits: string; memo?: string | undefined; timestamp: string; successful: boolean; finalized: boolean; reference: string };
 export function matchesPayment(invoice: PaymentRequest, transfer: ChainTransfer) {
   const solana = invoice.method === "USDT-SOLANA";
   const timestamp = Date.parse(transfer.timestamp);
