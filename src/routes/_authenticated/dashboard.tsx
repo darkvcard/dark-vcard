@@ -22,7 +22,6 @@ function Dashboard() {
   const { data: orders = [], isLoading } = useQuery({
     queryKey: ["my-orders", user?.id],
     enabled: !!user,
-    refetchInterval: 8000,
     queryFn: async () => {
       if (!user) return [];
       const { data, error } = await supabase.from("orders").select("*, cards(*), payment_invoices(*)").eq("user_id", user.id).order("created_at", { ascending: false });
@@ -76,8 +75,8 @@ function Dashboard() {
                     <td className="p-3">{o.cards?.card_name ?? "—"}</td>
                     <td className="p-3 font-mono">${Number(o.amount_usd ?? 0).toFixed(2)}</td>
                     <td className="p-3 font-mono">{o.crypto_method}</td>
-                    <td className="max-w-[160px] truncate p-3 font-mono text-xs">{o.transaction_hash.startsWith("awaiting-payment:") ? "Awaiting payment" : o.transaction_hash}</td>
-                    <td className="p-3"><div className="flex flex-wrap items-center gap-2"><StatusBadge status={o.status} />{o.status === "pending" && o.payment_invoices && <Button size="sm" variant="terminal" onClick={() => setPaying(o.payment_invoices)}>Payment details</Button>}</div></td>
+                    <td className="max-w-[160px] truncate p-3 font-mono text-xs">{o.txid ?? "Not submitted"}</td>
+                    <td className="p-3"><div className="flex flex-wrap items-center gap-2"><StatusBadge status={o.status} />{o.status === "pending" && o.payment_invoices && <Button size="sm" variant="terminal" onClick={() => setPaying(o.payment_invoices)}>Pay & submit TXID</Button>}</div></td>
                   </tr>
                 ))}
               </tbody>

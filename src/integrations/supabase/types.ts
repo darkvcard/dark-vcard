@@ -99,6 +99,7 @@ export type Database = {
           id: string
           status: Database["public"]["Enums"]["order_status"]
           transaction_hash: string
+          txid: string | null
           user_id: string
           wallet_address: string | null
         }
@@ -111,6 +112,7 @@ export type Database = {
           id?: string
           status?: Database["public"]["Enums"]["order_status"]
           transaction_hash: string
+          txid?: string | null
           user_id: string
           wallet_address?: string | null
         }
@@ -123,6 +125,7 @@ export type Database = {
           id?: string
           status?: Database["public"]["Enums"]["order_status"]
           transaction_hash?: string
+          txid?: string | null
           user_id?: string
           wallet_address?: string | null
         }
@@ -240,10 +243,18 @@ export type Database = {
         }
         Returns: boolean
       }
+      resolve_payment: {
+        Args: { p_approve: boolean; p_details?: string; p_order_id: string }
+        Returns: undefined
+      }
+      submit_payment_proof: {
+        Args: { p_order_id: string; p_txid: string }
+        Returns: undefined
+      }
     }
     Enums: {
       app_role: "admin" | "user"
-      order_status: "pending" | "completed" | "failed"
+      order_status: "pending" | "completed" | "failed" | "pending_approval"
       stock_status: "in_stock" | "low_stock" | "out_of_stock"
     }
     CompositeTypes: {
@@ -373,7 +384,7 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "user"],
-      order_status: ["pending", "completed", "failed"],
+      order_status: ["pending", "completed", "failed", "pending_approval"],
       stock_status: ["in_stock", "low_stock", "out_of_stock"],
     },
   },

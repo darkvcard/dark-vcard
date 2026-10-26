@@ -148,7 +148,7 @@ function CardsAdmin() {
 
 function OrdersAdmin() {
   const qc = useQueryClient();
-  const [filter, setFilter] = useState<"all" | "pending" | "completed" | "failed">("pending");
+  const [filter, setFilter] = useState<"all" | "pending" | "pending_approval" | "completed" | "failed">("pending_approval");
   const [approving, setApproving] = useState<{ id: string; details: string } | null>(null);
   const { data: orders = [] } = useQuery({
     queryKey: ["admin-orders"],
@@ -157,43 +157,45 @@ function OrdersAdmin() {
       if (error) throw error;
       return data;
     },
-    refetchInterval: 8000,
   });
   const shown = filter === "all" ? orders : orders.filter((o) => o.status === filter);
 
-  const update = async (id: string, status: "completed" | "failed", delivery_details?: string) => {
-    if (status === "completed" && !delivery_details?.trim()) { toast.error("Enter card delivery details before approving."); return; }
-    const { error } = await supabase.from("orders").update({ status, ...(delivery_details !== undefined ? { delivery_details } : {}) }).eq("id", id);
+  const resolve = async (id: string, approve: boolean, details?: string) => {
+    const { error } = await supabase.rpc("resolve_payment", { p_order_id: id, p_approve: approve, p_details: details ?? undefined });
     if (error) { toast.error(error.message); return; }
-    toast.success(`Order ${status}`);
+    toast.success(approve ? "Payment approved — card delivered" : "Payment rejected");
     setApproving(null);
     qc.invalidateQueries({ queryKey: ["admin-orders"] });
+    qc.invalidateQueries({ queryKey: ["card-units"] });
   };
+  const approve = (id: string, details: string) => resolve(id, true, details);
+  const reject = (id: string) => { if (confirm("Reject this payment?")) resolve(id, false); };
 
   return (
     <div className="mt-6 space-y-4">
-      <div className="flex gap-2">
-        {(["pending", "completed", "failed", "all"] as const).map((f) => (
-          <Button key={f} size="sm" variant={filter === f ? "neon" : "terminal"} onClick={() => setFilter(f)}>{f}</Button>
+      <div className="flex flex-wrap gap-2">
+        {(["pending_approval", "pending", "completed", "failed", "all"] as const).map((f) => (
+          <Button key={f} size="sm" variant={filter === f ? "neon" : "terminal"} onClick={() => setFilter(f)}>{f === "pending_approval" ? "to review" : f === "pending" ? "awaiting payment" : f}</Button>
         ))}
       </div>
       <div className="card-surface overflow-x-auto rounded-xl">
         <table className="w-full text-sm">
-          <thead className="font-mono text-xs uppercase text-muted-foreground"><tr className="border-b border-border">{["Date", "Card", "Amount", "Method", "Tx hash", "Wallet", "Status", ""].map((h, i) => <th key={i} className="p-3 text-left">{h}</th>)}</tr></thead>
+          <thead className="font-mono text-xs uppercase text-muted-foreground"><tr className="border-b border-border">{["Date", "Card", "Amount", "Method", "TXID", "Status", ""].map((h, i) => <th key={i} className="p-3 text-left">{h}</th>)}</tr></thead>
           <tbody>
-            {shown.length === 0 && <tr><td colSpan={8} className="p-3 text-muted-foreground">No orders.</td></tr>}
+            {shown.length === 0 && <tr><td colSpan={7} className="p-3 text-muted-foreground">No orders.</td></tr>}
             {shown.map((o) => (
               <tr key={o.id} className="border-b border-border/50">
                 <td className="p-3">{new Date(o.created_at).toLocaleString()}</td>
                 <td className="p-3">{o.cards?.card_name ?? "—"}</td>
                 <td className="p-3 font-mono">{o.payment_invoices ? `${o.payment_invoices.amount_display} USDT` : `$${Number(o.amount_usd ?? 0).toFixed(2)}`}</td>
                 <td className="p-3 font-mono">{o.crypto_method}</td>
-                <td className="max-w-[180px] break-all p-3 font-mono text-xs">{o.transaction_hash.startsWith("awaiting-payment:") ? o.id : o.transaction_hash}{o.payment_invoices?.last_error && <p className="mt-2 text-destructive">Verification unavailable — check provider settings.</p>}</td>
-                <td className="max-w-[140px] break-all p-3 font-mono text-xs">{o.wallet_address ?? "—"}</td>
+                <td className="max-w-[220px] break-all p-3 font-mono text-xs">{o.txid ? <a className="text-primary underline" target="_blank" rel="noreferrer" href={explorerUrl(o.crypto_method, o.txid)}>{o.txid}</a> : <span className="text-muted-foreground">Not submitted</span>}</td>
                 <td className="p-3"><StatusBadge status={o.status} /></td>
                 <td className="whitespace-nowrap p-3 text-right">
-                  {o.status !== "completed" && <Button size="icon" variant="ghost" title="Approve" onClick={() => setApproving({ id: o.id, details: o.delivery_details ?? "" })}><Check /></Button>}
-                  {o.status === "pending" && <Button size="icon" variant="ghost" title="Mark failed" onClick={() => update(o.id, "failed")}><X /></Button>}
+                  {o.status !== "completed" && <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="neon" onClick={() => setApproving({ id: o.id, details: o.delivery_details ?? "" })}><Check /> Approve Payment</Button>
+                    {o.status !== "failed" && <Button size="sm" variant="destructive" onClick={() => reject(o.id)}><X /> Reject Payment</Button>}
+                  </div>}
                 </td>
               </tr>
             ))}
@@ -202,12 +204,12 @@ function OrdersAdmin() {
       </div>
       <Dialog open={!!approving} onOpenChange={(o) => !o && setApproving(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle className="font-mono">approve_order</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-mono">approve_payment</DialogTitle></DialogHeader>
           {approving && (
             <div className="space-y-3">
-              <Label>Card delivery details (shown to the customer)</Label>
-              <Textarea rows={5} className="font-mono" placeholder={"Card number, expiry, CVV, redemption link…"} value={approving.details} onChange={(e) => setApproving({ ...approving, details: e.target.value })} />
-              <Button variant="neon" className="w-full" onClick={() => update(approving.id, "completed", approving.details)}>Mark completed</Button>
+              <Label>Card details shown to the customer</Label>
+              <Textarea rows={5} className="font-mono" placeholder={"Leave empty to use a stored card from Card details, or type: card number, expiry, CVV…"} value={approving.details} onChange={(e) => setApproving({ ...approving, details: e.target.value })} />
+              <Button variant="neon" className="w-full" onClick={() => approve(approving.id, approving.details)}>Approve Payment</Button>
             </div>
           )}
         </DialogContent>

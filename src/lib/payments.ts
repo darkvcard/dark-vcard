@@ -5,20 +5,15 @@ export const CRYPTO_METHODS = [
 
 export const BSC_USDT = "0x55d398326f99059ff775485246999027b3197955";
 export const SOLANA_USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
-export const PAYMENT_WINDOW_MS = 30 * 60 * 1000;
-export const PAYMENT_POLL_MS = 8000;
 export type PaymentMethod = typeof CRYPTO_METHODS[number]["id"];
-export type PaymentRequest = { method: string; recipient: string; amount_display: string; amount_units: string; memo: string; created_at: string; expires_at: string };
-export type ChainTransfer = { asset: string; recipient: string; amountUnits: string; memo?: string | undefined; timestamp: string; successful: boolean; finalized: boolean; reference: string };
-export function matchesPayment(invoice: PaymentRequest, transfer: ChainTransfer) {
-  const solana = invoice.method === "USDT-SOLANA";
-  const timestamp = Date.parse(transfer.timestamp);
-  return transfer.successful && transfer.finalized && Number.isFinite(timestamp)
-    && timestamp >= Date.parse(invoice.created_at) && timestamp <= Date.parse(invoice.expires_at)
-    && (solana ? transfer.asset === SOLANA_USDT && transfer.recipient === invoice.recipient && transfer.memo === invoice.memo
-      : transfer.asset.toLowerCase() === BSC_USDT && transfer.recipient.toLowerCase() === invoice.recipient.toLowerCase())
-    && transfer.amountUnits === invoice.amount_units;
+export type PaymentRequest = { method: string; recipient: string; amount_display: string; amount_units: string; memo: string };
+
+/** Mirrors the database check in submit_payment_proof. */
+export function isValidTxid(txid: string) {
+  const t = txid.trim();
+  return t.length >= 20 && t.length <= 200 && /^[A-Za-z0-9]+$/.test(t);
 }
+
 export function paymentUri(invoice: PaymentRequest) {
   return invoice.method === "USDT-SOLANA"
     ? `solana:${invoice.recipient}?amount=${invoice.amount_display}&spl-token=${SOLANA_USDT}&memo=${encodeURIComponent(invoice.memo)}&label=vCard`

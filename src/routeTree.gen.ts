@@ -15,7 +15,7 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as ShopRouteImport } from './routes/shop'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
-import { Route as ApiPublicJobsVerifyPaymentsRouteImport } from './routes/api/public/jobs/verify-payments'
+import { Route as AuthenticatedThankYouRouteImport } from './routes/_authenticated/thank-you'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -46,12 +46,11 @@ const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const ApiPublicJobsVerifyPaymentsRoute =
-  ApiPublicJobsVerifyPaymentsRouteImport.update({
-    id: '/api/public/jobs/verify-payments',
-    path: '/api/public/jobs/verify-payments',
-    getParentRoute: () => rootRouteImport,
-  } as any)
+const AuthenticatedThankYouRoute = AuthenticatedThankYouRouteImport.update({
+  id: '/thank-you',
+  path: '/thank-you',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -59,7 +58,7 @@ export interface FileRoutesByFullPath {
   '/shop': typeof ShopRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
-  '/api/public/jobs/verify-payments': typeof ApiPublicJobsVerifyPaymentsRoute
+  '/thank-you': typeof AuthenticatedThankYouRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -67,7 +66,7 @@ export interface FileRoutesByTo {
   '/shop': typeof ShopRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
-  '/api/public/jobs/verify-payments': typeof ApiPublicJobsVerifyPaymentsRoute
+  '/thank-you': typeof AuthenticatedThankYouRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -77,25 +76,13 @@ export interface FileRoutesById {
   '/shop': typeof ShopRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
-  '/api/public/jobs/verify-payments': typeof ApiPublicJobsVerifyPaymentsRoute
+  '/_authenticated/thank-you': typeof AuthenticatedThankYouRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/auth'
-    | '/shop'
-    | '/admin'
-    | '/dashboard'
-    | '/api/public/jobs/verify-payments'
+  fullPaths: '/' | '/auth' | '/shop' | '/admin' | '/dashboard' | '/thank-you'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/auth'
-    | '/shop'
-    | '/admin'
-    | '/dashboard'
-    | '/api/public/jobs/verify-payments'
+  to: '/' | '/auth' | '/shop' | '/admin' | '/dashboard' | '/thank-you'
   id:
     | '__root__'
     | '/'
@@ -104,7 +91,7 @@ export interface FileRouteTypes {
     | '/shop'
     | '/_authenticated/admin'
     | '/_authenticated/dashboard'
-    | '/api/public/jobs/verify-payments'
+    | '/_authenticated/thank-you'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -112,7 +99,6 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   ShopRoute: typeof ShopRoute
-  ApiPublicJobsVerifyPaymentsRoute: typeof ApiPublicJobsVerifyPaymentsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -159,12 +145,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedDashboardRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/api/public/jobs/verify-payments': {
-      id: '/api/public/jobs/verify-payments'
-      path: '/api/public/jobs/verify-payments'
-      fullPath: '/api/public/jobs/verify-payments'
-      preLoaderRoute: typeof ApiPublicJobsVerifyPaymentsRouteImport
-      parentRoute: typeof rootRouteImport
+    '/_authenticated/thank-you': {
+      id: '/_authenticated/thank-you'
+      path: '/thank-you'
+      fullPath: '/thank-you'
+      preLoaderRoute: typeof AuthenticatedThankYouRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
   }
 }
@@ -172,11 +158,13 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAdminRoute: typeof AuthenticatedAdminRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedThankYouRoute: typeof AuthenticatedThankYouRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAdminRoute: AuthenticatedAdminRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedThankYouRoute: AuthenticatedThankYouRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
@@ -187,7 +175,6 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   ShopRoute: ShopRoute,
-  ApiPublicJobsVerifyPaymentsRoute: ApiPublicJobsVerifyPaymentsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
