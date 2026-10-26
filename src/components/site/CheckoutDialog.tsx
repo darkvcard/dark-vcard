@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -9,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/use-auth";
 import { CRYPTO_METHODS } from "@/lib/payments";
-import { createPayment, paymentAvailability } from "@/lib/payment.functions";
+import { createPayment } from "@/lib/payment.functions";
 import type { Invoice } from "@/lib/payment-types";
 import { WaitingForPayment } from "./WaitingForPayment";
 import type { CardRow } from "./CardTile";
@@ -21,8 +20,6 @@ export function CheckoutDialog({ card, onClose }: { card: CardRow | null; onClos
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [busy, setBusy] = useState(false);
   const create = useServerFn(createPayment);
-  const availability = useServerFn(paymentAvailability);
-  const { data: available } = useQuery({ queryKey: ["payment-availability"], queryFn: () => availability(), enabled: !!card });
   const m = CRYPTO_METHODS.find((c) => c.id === method);
   const close = () => { setInvoice(null); onClose(); };
 
@@ -57,9 +54,8 @@ export function CheckoutDialog({ card, onClose }: { card: CardRow | null; onClos
                 </SelectContent>
               </Select>
             </div>
-            <p className="text-sm text-muted-foreground">{method === "USDT-BEP20" ? "A unique USDT amount includes a small matching adjustment of 0.01–0.99 USDT. The exact total is shown before you send." : "Include your order ID in the Solana transaction memo."}</p>
-            {m && available && !available[m.id] && <p role="status" className="text-sm text-destructive">Payments on this network are not available yet. Please contact support.</p>}
-            <Button variant="neon" className="w-full" disabled={busy || !m || !available?.[m.id]} onClick={submit}>{busy ? "Creating order…" : "Continue to payment"}</Button>
+            <p className="text-sm text-muted-foreground">You'll see the wallet and exact amount, then paste your transaction hash for admin review.</p>
+            <Button variant="neon" className="w-full" disabled={busy || !m} onClick={submit}>{busy ? "Creating order…" : "Continue to payment"}</Button>
           </div>
         )}
       </DialogContent>
