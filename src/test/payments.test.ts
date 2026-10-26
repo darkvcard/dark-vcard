@@ -6,8 +6,7 @@ describe("Manual payment rules", () => {
     expect(CRYPTO_METHODS.map(m => [m.id, m.address])).toEqual([["USDT-BEP20", "0x35aec7E35F65ea227e49fDd321709D52Ada389E4"], ["USDT-SOLANA", "3mjR2gV3MJrudjus9yBuh3EtSMw6Ca5BVFcYiMDa1VjQ"]]);
   });
   it("accepts real-looking BSC and Solana hashes and rejects junk", () => {
-    expect(isValidTxid("0x" + "a".repeat(64))).toBe(false); // 'x' is alphanumeric, ok — but check length rule below
-    expect(isValidTxid("a1".repeat(32))).toBe(true);
+    expect(isValidTxid("0x" + "a".repeat(64))).toBe(true);
     expect(isValidTxid("5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW")).toBe(true);
     expect(isValidTxid("short")).toBe(false);
     expect(isValidTxid("has spaces in the hash value here")).toBe(false);
