@@ -24,6 +24,9 @@ export const Route = createFileRoute("/_authenticated/admin")({
 
 type Draft = Partial<CardRow> & { file?: File | null };
 
+const explorerUrl = (method: string, txid: string) =>
+  method === "USDT-SOLANA" ? `https://solscan.io/tx/${txid}` : `https://bscscan.com/tx/${txid}`;
+
 function Admin() {
   const { isAdmin, loading } = useAuth();
   if (loading) return <Layout><p className="p-12 font-mono text-muted-foreground">verifying access…</p></Layout>;
@@ -161,7 +164,7 @@ function OrdersAdmin() {
   const shown = filter === "all" ? orders : orders.filter((o) => o.status === filter);
 
   const resolve = async (id: string, approve: boolean, details?: string) => {
-    const { error } = await supabase.rpc("resolve_payment", { p_order_id: id, p_approve: approve, p_details: details ?? undefined });
+    const { error } = await supabase.rpc("resolve_payment", { p_order_id: id, p_approve: approve, ...(details ? { p_details: details } : {}) });
     if (error) { toast.error(error.message); return; }
     toast.success(approve ? "Payment approved — card delivered" : "Payment rejected");
     setApproving(null);
