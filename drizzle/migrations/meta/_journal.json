@@ -15,6 +15,13 @@
       "when": 1792945560073,
       "tag": "0001_secure_crypto_invoices_and_fulfillment",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793042865227,
+      "tag": "0002_manual_payment_verification",
+      "breakpoints": true
     }
   ]
 }
