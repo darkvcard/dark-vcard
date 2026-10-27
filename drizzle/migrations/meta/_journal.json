@@ -22,6 +22,13 @@
       "when": 1793042865227,
       "tag": "0002_manual_payment_verification",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793078182142,
+      "tag": "0003_restrict_card_images_read",
+      "breakpoints": true
     }
   ]
 }
