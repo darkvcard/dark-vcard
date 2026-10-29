@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/use-auth";
+import { supabase } from "@/integrations/supabase/client";
 import { CRYPTO_METHODS } from "@/lib/payments";
 import { createPayment } from "@/lib/payment.functions";
 import type { Invoice } from "@/lib/payment-types";
@@ -23,12 +24,45 @@ export function CheckoutDialog({ card, onClose }: { card: CardRow | null; onClos
   const m = CRYPTO_METHODS.find((c) => c.id === method);
   const close = () => { setInvoice(null); onClose(); };
 
+  const [authError, setAuthError] = useState(false);
+  const isAuthError = (e: unknown) => {
+    const msg = e instanceof Error ? e.message : String(e);
+    return /unauthorized|401|invalid token|jwt/i.test(msg);
+  };
+  const expire = async () => {
+    await supabase.auth.signOut();
+    setAuthError(true);
+    toast.error("Your session has expired. Please log in again.");
+    onClose();
+    navigate({ to: "/auth" });
+  };
+
   const submit = async () => {
     if (!card || !user || !m) return;
     setBusy(true);
-    try { setInvoice(await create({ data: { cardId: card.id, method: m.id } })); }
-    catch (error) { toast.error(error instanceof Error ? error.message : "Could not create payment"); }
-    finally { setBusy(false); }
+    setAuthError(false);
+    try {
+      // Make sure we have a valid, fresh session before calling the server.
+      const { data } = await supabase.auth.getSession();
+      const expiresSoon = !data.session || (data.session.expires_at ?? 0) * 1000 < Date.now() + 60_000;
+      if (expiresSoon) {
+        const { data: r, error } = await supabase.auth.refreshSession();
+        if (error || !r.session) { await expire(); return; }
+      }
+      const payload = { data: { cardId: card.id, method: m.id } };
+      try {
+        setInvoice(await create(payload));
+      } catch (e) {
+        if (!isAuthError(e)) throw e;
+        // Token rejected: refresh once and retry.
+        const { data: r, error } = await supabase.auth.refreshSession();
+        if (error || !r.session) { await expire(); return; }
+        try { setInvoice(await create(payload)); }
+        catch (e2) { if (isAuthError(e2)) { await expire(); return; } throw e2; }
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not create payment");
+    } finally { setBusy(false); }
   };
 
   return (
