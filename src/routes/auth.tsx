@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable/index";
 import { useAuth } from "@/hooks/use-auth";
 
 export const Route = createFileRoute("/auth")({
@@ -44,17 +43,18 @@ function AuthPage() {
     if (mode === "in") {
       const { error } = await supabase.auth.signInWithPassword(p.data);
       if (error) toast.error(error.message);
+      else navigate({ to: "/dashboard" });
     } else {
-      const { error } = await supabase.auth.signUp({ ...p.data, options: { emailRedirectTo: window.location.origin } });
+      const { data, error } = await supabase.auth.signUp(p.data);
       if (error) toast.error(error.message);
-      else toast.success("Check your email to confirm your account");
+      else if (data.session) navigate({ to: "/dashboard" });
+      else {
+        const r = await supabase.auth.signInWithPassword(p.data);
+        if (r.error) toast.error(r.error.message);
+        else navigate({ to: "/dashboard" });
+      }
     }
     setBusy(false);
-  };
-
-  const google = async () => {
-    const r = await lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin + "/auth" });
-    if (r.error) toast.error(String(r.error.message ?? r.error));
   };
 
   return (
@@ -69,7 +69,6 @@ function AuthPage() {
             <div className="space-y-2"><Label htmlFor="pw">Password</Label><Input id="pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></div>
             <Button variant="neon" className="w-full" disabled={busy}>{mode === "in" ? "Sign in" : "Sign up"}</Button>
           </form>
-          <Button variant="outline" className="mt-3 w-full" onClick={google}>Continue with Google</Button>
           <button className="mt-6 w-full font-mono text-xs text-muted-foreground hover:text-primary" onClick={() => setMode(mode === "in" ? "up" : "in")}>
             {mode === "in" ? "No account? sign_up" : "Have an account? sign_in"}
           </button>

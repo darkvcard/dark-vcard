@@ -49,7 +49,7 @@ function Footer() {
     <footer className="border-t border-border/60 bg-card/40">
       <div className="mx-auto grid max-w-7xl gap-8 px-4 py-12 md:grid-cols-3">
         <div className="space-y-3">
-          <Brand />
+          <Brand src="/logo-trans.png" />
           <p className="text-sm text-muted-foreground">Privacy-first prepaid virtual cards, paid with crypto. vcard.bond</p>
         </div>
         <div className="space-y-2 font-mono text-sm">
