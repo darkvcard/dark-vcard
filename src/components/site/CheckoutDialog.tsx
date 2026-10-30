@@ -1,18 +1,42 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 import { CRYPTO_METHODS, type PaymentMethod } from "@/lib/payments";
 import { createPayment } from "@/lib/payment.functions";
-import type { Invoice } from "@/lib/payment-types";
+import {
+  isAuthFailure,
+  paymentFailureHint,
+  paymentFailureTitle,
+  toPaymentFailure,
+} from "@/lib/payment-errors";
+import type { CreatePaymentResult, Invoice, PaymentFailure } from "@/lib/payment-types";
 import { WaitingForPayment } from "./WaitingForPayment";
 import type { CardRow } from "./CardTile";
+
+// Shown when the browser itself has no usable session, so no request is sent.
+const NO_SESSION_FAILURE: PaymentFailure = {
+  stage: "auth",
+  message: "No active session found. Sign in again and retry.",
+};
 
 export function CheckoutDialog({ card, onClose }: { card: CardRow | null; onClose: () => void }) {
   const { user, loading } = useAuth();
@@ -22,15 +46,14 @@ export function CheckoutDialog({ card, onClose }: { card: CardRow | null; onClos
   const [busy, setBusy] = useState(false);
   const create = useServerFn(createPayment);
   const m = CRYPTO_METHODS.find((c) => c.id === method);
-  const close = () => { setInvoice(null); onClose(); };
-
-  // Every payment failure is reported here. The user is never signed out: a
-  // failed payment must not destroy a valid session.
-  const [paymentError, setPaymentError] = useState<string | null>(null);
-  const isAuthError = (e: unknown) => {
-    const msg = e instanceof Error ? e.message : String(e);
-    return /unauthorized|invalid token|jwt|session/i.test(msg);
+  const close = () => {
+    setInvoice(null);
+    onClose();
   };
+
+  // Every payment failure is reported here with the cause the server supplied.
+  // The user is never signed out: a failed payment must not destroy a valid session.
+  const [paymentError, setPaymentError] = useState<PaymentFailure | null>(null);
 
   // Reads the live session token at call time. `force` refreshes once, which is
   // only used when the server rejected the token we just sent.
@@ -52,6 +75,23 @@ export function CheckoutDialog({ card, onClose }: { card: CardRow | null; onClos
       headers: { Authorization: `Bearer ${token}` },
     });
 
+  // The auth middleware runs before the handler, so a rejected session arrives as
+  // a throw while invoice/database problems arrive as `{ ok: false }`. Normalize
+  // both so the alert always shows the server's own reason.
+  const attempt = async (
+    token: string,
+    cardId: string,
+    methodId: PaymentMethod,
+  ): Promise<CreatePaymentResult> => {
+    try {
+      return await createInvoice(token, cardId, methodId);
+    } catch (error) {
+      const failure = toPaymentFailure(error);
+      console.error("[checkout] payment request threw", failure);
+      return { ok: false, ...failure };
+    }
+  };
+
   const submit = async () => {
     if (!card || !m) return;
     setBusy(true);
@@ -60,31 +100,57 @@ export function CheckoutDialog({ card, onClose }: { card: CardRow | null; onClos
       // Grab the session immediately before the request and send its access
       // token as a Bearer token so the server function can authenticate it.
       let token = await currentAccessToken();
-      if (!token) { setPaymentError("Payment failed. Please try again."); return; }
-      try {
-        setInvoice(await createInvoice(token, card.id, m.id));
-      } catch (e) {
-        if (!isAuthError(e)) throw e;
-        // The token we sent was rejected: refresh once and retry with the new one.
-        console.warn("[checkout] token rejected, retrying with a refreshed session", e);
-        token = await currentAccessToken(true);
-        if (!token) { setPaymentError("Payment failed. Please try again."); return; }
-        setInvoice(await createInvoice(token, card.id, m.id));
+      if (!token) {
+        setPaymentError(NO_SESSION_FAILURE);
+        return;
       }
+
+      let result = await attempt(token, card.id, m.id);
+      if (!result.ok && isAuthFailure(result)) {
+        // The token we sent was rejected: refresh once and retry with the new one.
+        console.warn("[checkout] token rejected, retrying with a refreshed session", result);
+        token = await currentAccessToken(true);
+        if (!token) {
+          setPaymentError(NO_SESSION_FAILURE);
+          return;
+        }
+        result = await attempt(token, card.id, m.id);
+      }
+
+      if (result.ok) {
+        setInvoice(result.invoice);
+        return;
+      }
+      console.error("[checkout] payment failed", result);
+      setPaymentError(result);
     } catch (error) {
-      console.error("[checkout] payment failed", error);
-      setPaymentError("Payment failed. Please try again.");
-    } finally { setBusy(false); }
+      // Transport/serialization failure: still show what is known instead of a
+      // blanket "please try again".
+      const failure = toPaymentFailure(error);
+      console.error("[checkout] payment failed", failure);
+      setPaymentError(failure);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <Dialog open={!!card} onOpenChange={(o) => !o && close()}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto border-primary/40">
         <DialogHeader>
-          <DialogTitle className="font-mono">&gt; checkout_{card?.card_type.toLowerCase()}</DialogTitle>
-          <DialogDescription>{card?.card_name} — <span className="text-neon font-mono">${Number(card?.price_in_usd ?? 0).toFixed(2)}</span></DialogDescription>
+          <DialogTitle className="font-mono">
+            &gt; checkout_{card?.card_type.toLowerCase()}
+          </DialogTitle>
+          <DialogDescription>
+            {card?.card_name} —{" "}
+            <span className="text-neon font-mono">
+              ${Number(card?.price_in_usd ?? 0).toFixed(2)}
+            </span>
+          </DialogDescription>
         </DialogHeader>
-        {invoice ? <WaitingForPayment invoice={invoice} onDone={close} /> : loading ? (
+        {invoice ? (
+          <WaitingForPayment invoice={invoice} onDone={close} />
+        ) : loading ? (
           <div role="status" aria-busy="true" aria-live="polite" className="space-y-3 py-2">
             <span className="sr-only">Checking your session…</span>
             <Skeleton className="h-4 w-24" />
@@ -93,27 +159,50 @@ export function CheckoutDialog({ card, onClose }: { card: CardRow | null; onClos
           </div>
         ) : !user ? (
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">Sign in to place an order and track delivery.</p>
-            <Button variant="neon" className="w-full" onClick={() => navigate({ to: "/auth" })}>Sign in to continue</Button>
+            <p className="text-sm text-muted-foreground">
+              Sign in to place an order and track delivery.
+            </p>
+            <Button variant="neon" className="w-full" onClick={() => navigate({ to: "/auth" })}>
+              Sign in to continue
+            </Button>
           </div>
         ) : (
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Pay with</Label>
               <Select value={method} onValueChange={setMethod}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
-                  {CRYPTO_METHODS.map((c) => <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>)}
+                  {CRYPTO_METHODS.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
-            <p className="text-sm text-muted-foreground">You'll see the wallet and exact amount, then paste your transaction hash for admin review.</p>
+            <p className="text-sm text-muted-foreground">
+              You'll see the wallet and exact amount, then paste your transaction hash for admin
+              review.
+            </p>
             {paymentError && (
-              <div role="alert" className="rounded border border-destructive bg-destructive/10 p-3 text-sm font-medium text-destructive">
-                {paymentError}
+              <div
+                role="alert"
+                className="rounded border border-destructive bg-destructive/10 p-3 text-sm font-medium text-destructive"
+              >
+                <p>{paymentFailureTitle(paymentError)}</p>
+                {paymentFailureHint(paymentError) && (
+                  <p className="mt-1 break-words font-mono text-[11px] font-normal opacity-80">
+                    {paymentFailureHint(paymentError)}
+                  </p>
+                )}
               </div>
             )}
-            <Button variant="neon" className="w-full" disabled={busy || !m} onClick={submit}>{busy ? "Creating order…" : "Continue to payment"}</Button>
+            <Button variant="neon" className="w-full" disabled={busy || !m} onClick={submit}>
+              {busy ? "Creating order…" : "Continue to payment"}
+            </Button>
           </div>
         )}
       </DialogContent>

@@ -2,17 +2,17 @@
 // Server-side Supabase client with service role key - bypasses RLS.
 // Use this for admin operations in server functions and server routes only.
 // For user-authenticated queries (with RLS), use the auth middleware instead.
-import { createClient } from '@supabase/supabase-js';
-import type { Database } from './types';
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "./types";
 
 function isNewSupabaseApiKey(value: string): boolean {
-  return value.startsWith('sb_publishable_') || value.startsWith('sb_secret_');
+  return value.startsWith("sb_publishable_") || value.startsWith("sb_secret_");
 }
 
 function createSupabaseFetch(supabaseKey: string): typeof fetch {
   return (input, init) => {
     const headers = new Headers(
-      typeof Request !== 'undefined' && input instanceof Request ? input.headers : undefined,
+      typeof Request !== "undefined" && input instanceof Request ? input.headers : undefined,
     );
 
     if (init?.headers) {
@@ -20,50 +20,127 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
     }
 
     // New Supabase API keys are opaque strings, not bearer JWTs.
-    if (isNewSupabaseApiKey(supabaseKey) && headers.get('Authorization') === `Bearer ${supabaseKey}`) {
-      headers.delete('Authorization');
+    if (
+      isNewSupabaseApiKey(supabaseKey) &&
+      headers.get("Authorization") === `Bearer ${supabaseKey}`
+    ) {
+      headers.delete("Authorization");
     }
 
-    headers.set('apikey', supabaseKey);
+    headers.set("apikey", supabaseKey);
     return fetch(input, { ...init, headers });
   };
 }
 
-function createSupabaseAdminClient() {
-  const SUPABASE_URL = process.env['SUPABASE_URL'];
-  const SUPABASE_SERVICE_ROLE_KEY = process.env['SUPABASE_SERVICE_ROLE_KEY'];
+export type SupabaseAdminConfig = {
+  url: string;
+  serviceRoleKey: string;
+  // Which variable the URL came from, so log output shows when only the public
+  // `VITE_SUPABASE_URL` is present in the deployment environment.
+  urlSource: "SUPABASE_URL" | "VITE_SUPABASE_URL";
+};
 
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    const missing = [
-      ...(!SUPABASE_URL ? ['SUPABASE_URL'] : []),
-      ...(!SUPABASE_SERVICE_ROLE_KEY ? ['SUPABASE_SERVICE_ROLE_KEY'] : []),
-    ];
-    const message = `Missing Supabase environment variable(s): ${missing.join(', ')}. Connect Supabase in Lovable Cloud.`;
-    console.error(`[Supabase] ${message}`);
-    throw new Error(message);
+function readEnv(name: string): string | undefined {
+  // Resolved per call: on Workers/Vercel the runtime env is attached to the
+  // request, so a module-scope read can be empty or stale.
+  const value = typeof process !== "undefined" ? process.env?.[name] : undefined;
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+}
+
+// Reads the server-side Supabase configuration from the current runtime env.
+// Never logs key material - only whether a variable is present.
+export function readSupabaseAdminConfig():
+  | { ok: true; config: SupabaseAdminConfig }
+  | { ok: false; missing: string[]; url: string | undefined } {
+  const url = readEnv("SUPABASE_URL") ?? readEnv("VITE_SUPABASE_URL");
+  const serviceRoleKey = readEnv("SUPABASE_SERVICE_ROLE_KEY");
+  const missing = [
+    ...(!url ? ["SUPABASE_URL"] : []),
+    ...(!serviceRoleKey ? ["SUPABASE_SERVICE_ROLE_KEY"] : []),
+  ];
+  if (!url || !serviceRoleKey) return { ok: false, missing, url };
+  return {
+    ok: true,
+    config: {
+      url,
+      serviceRoleKey,
+      urlSource: readEnv("SUPABASE_URL") ? "SUPABASE_URL" : "VITE_SUPABASE_URL",
+    },
+  };
+}
+
+function hostOf(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).host;
+  } catch {
+    return "invalid-url";
   }
+}
 
-  return createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+// Safe, secret-free summary of the server environment. Included in server
+// function error responses so a failing deploy can be diagnosed from the client.
+export function describeSupabaseAdminEnv(): string {
+  const state = (name: string) => (readEnv(name) ? "set" : "MISSING");
+  const runtimeUrl = readEnv("SUPABASE_URL");
+  const config = readSupabaseAdminConfig();
+  return [
+    `SUPABASE_URL=${state("SUPABASE_URL")}`,
+    `VITE_SUPABASE_URL=${state("VITE_SUPABASE_URL")}`,
+    `SUPABASE_SERVICE_ROLE_KEY=${state("SUPABASE_SERVICE_ROLE_KEY")}`,
+    `SUPABASE_PUBLISHABLE_KEY=${state("SUPABASE_PUBLISHABLE_KEY")}`,
+    `VITE_SUPABASE_PUBLISHABLE_KEY=${state("VITE_SUPABASE_PUBLISHABLE_KEY")}`,
+    `host=${hostOf(config.ok ? config.config.url : runtimeUrl) ?? "none"}`,
+    `urlSource=${config.ok ? config.config.urlSource : "none"}`,
+  ].join(" ");
+}
+
+function createSupabaseAdminClient(url: string, serviceRoleKey: string) {
+  return createClient<Database>(url, serviceRoleKey, {
     global: {
-      fetch: createSupabaseFetch(SUPABASE_SERVICE_ROLE_KEY),
+      fetch: createSupabaseFetch(serviceRoleKey),
     },
     auth: {
       storage: undefined,
       persistSession: false,
       autoRefreshToken: false,
-    }
+    },
   });
 }
 
-let _supabaseAdmin: ReturnType<typeof createSupabaseAdminClient> | undefined;
+type SupabaseAdminClient = ReturnType<typeof createSupabaseAdminClient>;
 
-// Server-side Supabase client with service role - bypasses RLS
-// SECURITY: Only use this for trusted server-side operations, never expose to client code
-// Load inside server handlers: const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-// Top-level import is safe only in other .server.ts modules - route files and *.functions.ts ship to the client bundle.
-export const supabaseAdmin = new Proxy({} as ReturnType<typeof createSupabaseAdminClient>, {
+// Clients are keyed by the exact url+key pair they were built from, so a runtime
+// that hands different env values to different requests can never reuse a client
+// pointed at the wrong backend. Env itself is always read at call time.
+const clients = new Map<string, SupabaseAdminClient>();
+
+/**
+ * Server-side Supabase client with the service role key - bypasses RLS.
+ * SECURITY: only use for trusted server-side operations, never in client code.
+ * Load inside server handlers: `const { getSupabaseAdmin } = await import("@/integrations/supabase/client.server");`
+ */
+export function getSupabaseAdmin(): SupabaseAdminClient {
+  const resolved = readSupabaseAdminConfig();
+  if (!resolved.ok) {
+    const message = `Missing Supabase environment variable(s): ${resolved.missing.join(", ")}.`;
+    console.error(`[Supabase] ${message} ${describeSupabaseAdminEnv()}`);
+    throw Object.assign(new Error(message), { missing: resolved.missing });
+  }
+  const { url, serviceRoleKey } = resolved.config;
+  const cacheKey = `${url}\u0000${serviceRoleKey}`;
+  let client = clients.get(cacheKey);
+  if (!client) {
+    client = createSupabaseAdminClient(url, serviceRoleKey);
+    clients.set(cacheKey, client);
+  }
+  return client;
+}
+
+// Backwards-compatible accessor: every property access resolves the current
+// request's environment instead of a client captured at module load.
+export const supabaseAdmin = new Proxy({} as SupabaseAdminClient, {
   get(_, prop, receiver) {
-    if (!_supabaseAdmin) _supabaseAdmin = createSupabaseAdminClient();
-    return Reflect.get(_supabaseAdmin, prop, receiver);
+    return Reflect.get(getSupabaseAdmin(), prop, receiver);
   },
 });

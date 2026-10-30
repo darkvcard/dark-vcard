@@ -8,11 +8,22 @@ const mocks = vi.hoisted(() => ({
   signOut: vi.fn(),
   createPayment: vi.fn(),
   navigate: vi.fn(),
-  authState: { user: { id: "user-1", email: "alice@example.com" } as { id: string; email: string } | null, isAdmin: false, loading: false, roleLoading: false },
+  authState: {
+    user: { id: "user-1", email: "alice@example.com" } as { id: string; email: string } | null,
+    isAdmin: false,
+    loading: false,
+    roleLoading: false,
+  },
 }));
 
 vi.mock("@/integrations/supabase/client", () => ({
-  supabase: { auth: { getSession: mocks.getSession, refreshSession: mocks.refreshSession, signOut: mocks.signOut } },
+  supabase: {
+    auth: {
+      getSession: mocks.getSession,
+      refreshSession: mocks.refreshSession,
+      signOut: mocks.signOut,
+    },
+  },
 }));
 
 vi.mock("@/hooks/use-auth", () => ({
@@ -71,7 +82,8 @@ const renderCheckout = () =>
     </QueryClientProvider>,
   );
 
-const clickContinue = () => fireEvent.click(screen.getByRole("button", { name: /continue to payment/i }));
+const clickContinue = () =>
+  fireEvent.click(screen.getByRole("button", { name: /continue to payment/i }));
 
 describe("Checkout order creation", () => {
   beforeEach(() => {
@@ -92,8 +104,11 @@ describe("Checkout order creation", () => {
   });
 
   it("reads the session right before the request and sends the access token as a Bearer header", async () => {
-    mocks.getSession.mockResolvedValue({ data: { session: { access_token: "token-123" } }, error: null });
-    mocks.createPayment.mockResolvedValue(invoice);
+    mocks.getSession.mockResolvedValue({
+      data: { session: { access_token: "token-123" } },
+      error: null,
+    });
+    mocks.createPayment.mockResolvedValue({ ok: true, invoice });
 
     renderCheckout();
     clickContinue();
@@ -108,18 +123,64 @@ describe("Checkout order creation", () => {
     expect(mocks.signOut).not.toHaveBeenCalled();
   });
 
-  it("shows a red payment error without signing the user out when the payment call fails", async () => {
-    mocks.getSession.mockResolvedValue({ data: { session: { access_token: "token-123" } }, error: null });
+  it("shows a red payment error with the server's own reason without signing the user out", async () => {
+    mocks.getSession.mockResolvedValue({
+      data: { session: { access_token: "token-123" } },
+      error: null,
+    });
     mocks.createPayment.mockRejectedValue(new Error("Card unavailable"));
 
     renderCheckout();
     clickContinue();
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Payment failed. Please try again.");
+    expect(alert).toHaveTextContent("Payment failed: Card unavailable");
     expect(alert.className).toContain("destructive");
     expect(mocks.signOut).not.toHaveBeenCalled();
     expect(mocks.navigate).not.toHaveBeenCalled();
+  });
+
+  it("shows the returned failure details when the server function reports a config problem", async () => {
+    mocks.getSession.mockResolvedValue({
+      data: { session: { access_token: "token-123" } },
+      error: null,
+    });
+    mocks.createPayment.mockResolvedValue({
+      ok: false,
+      stage: "config",
+      message: "Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY.",
+      env: "SUPABASE_URL=set SUPABASE_SERVICE_ROLE_KEY=MISSING",
+    });
+
+    renderCheckout();
+    clickContinue();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Payment failed: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY.",
+    );
+    expect(alert).toHaveTextContent("stage: config");
+    expect(alert).toHaveTextContent("SUPABASE_SERVICE_ROLE_KEY=MISSING");
+  });
+
+  it("shows the database error code when the invoice RPC is rejected", async () => {
+    mocks.getSession.mockResolvedValue({
+      data: { session: { access_token: "token-123" } },
+      error: null,
+    });
+    mocks.createPayment.mockResolvedValue({
+      ok: false,
+      stage: "database",
+      message: "function public.create_crypto_invoice(uuid, uuid, text) does not exist",
+      code: "42883",
+    });
+
+    renderCheckout();
+    clickContinue();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("does not exist");
+    expect(alert).toHaveTextContent("code: 42883");
   });
 
   it("never signs out when there is no usable session", async () => {
@@ -129,17 +190,23 @@ describe("Checkout order creation", () => {
     renderCheckout();
     clickContinue();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Payment failed. Please try again.");
+    expect(await screen.findByRole("alert")).toHaveTextContent(/no active session/i);
     expect(mocks.createPayment).not.toHaveBeenCalled();
     expect(mocks.signOut).not.toHaveBeenCalled();
   });
 
   it("retries once with a refreshed token when the server rejects the first one", async () => {
-    mocks.getSession.mockResolvedValue({ data: { session: { access_token: "stale-token" } }, error: null });
-    mocks.refreshSession.mockResolvedValue({ data: { session: { access_token: "fresh-token" } }, error: null });
+    mocks.getSession.mockResolvedValue({
+      data: { session: { access_token: "stale-token" } },
+      error: null,
+    });
+    mocks.refreshSession.mockResolvedValue({
+      data: { session: { access_token: "fresh-token" } },
+      error: null,
+    });
     mocks.createPayment
       .mockRejectedValueOnce(new Error("Unauthorized: session rejected"))
-      .mockResolvedValueOnce(invoice);
+      .mockResolvedValueOnce({ ok: true, invoice });
 
     renderCheckout();
     clickContinue();
