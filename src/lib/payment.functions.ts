@@ -1,12 +1,18 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { requireUser } from "./require-user";
+import { requireUser, verifyAccessToken } from "./require-user";
 import type { Invoice } from "./payment-types";
 
+// The access token is sent both in the Authorization header and in the body so
+// checkout never depends on a single transport for the session.
 export const createPayment = createServerFn({ method: "POST" })
-  .middleware([requireUser])
-  .inputValidator(z.object({ cardId: z.string().uuid(), method: z.enum(["USDT-BEP20", "USDT-SOLANA"]) }))
-  .handler(async ({ data, context }) => {
+  .inputValidator(z.object({
+    cardId: z.string().uuid(),
+    method: z.enum(["USDT-BEP20", "USDT-SOLANA"]),
+    accessToken: z.string().min(10).max(4096),
+  }))
+  .handler(async ({ data }) => {
+    const context = await verifyAccessToken(data.accessToken);
     console.log("[createPayment] start", { user: context.userId, card: data.cardId, method: data.method });
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const result = await supabaseAdmin.rpc("create_crypto_invoice", { p_user_id: context.userId, p_card_id: data.cardId, p_method: data.method });
