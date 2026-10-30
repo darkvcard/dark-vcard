@@ -12,7 +12,7 @@ export const createPayment = createServerFn({ method: "POST" })
     accessToken: z.string().min(10).max(4096),
   }))
   .handler(async ({ data }) => {
-    const { verifyAccessToken } = await import("./require-user");
+    const { verifyAccessToken } = await import("./require-user.server");
     const context = await verifyAccessToken(data.accessToken);
     console.log("[createPayment] start", { user: context.userId, card: data.cardId, method: data.method });
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
