@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { requireUser, verifyAccessToken } from "./require-user";
+import { requireUser } from "./require-user";
 import type { Invoice } from "./payment-types";
 
 // The access token is sent both in the Authorization header and in the body so
@@ -12,6 +12,7 @@ export const createPayment = createServerFn({ method: "POST" })
     accessToken: z.string().min(10).max(4096),
   }))
   .handler(async ({ data }) => {
+    const { verifyAccessToken } = await import("./require-user");
     const context = await verifyAccessToken(data.accessToken);
     console.log("[createPayment] start", { user: context.userId, card: data.cardId, method: data.method });
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
