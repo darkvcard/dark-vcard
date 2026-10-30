@@ -24,41 +24,40 @@ export function CheckoutDialog({ card, onClose }: { card: CardRow | null; onClos
   const m = CRYPTO_METHODS.find((c) => c.id === method);
   const close = () => { setInvoice(null); onClose(); };
 
-  const [authError, setAuthError] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const isAuthError = (e: unknown) => {
     const msg = e instanceof Error ? e.message : String(e);
-    return /unauthorized|401|invalid token|jwt/i.test(msg);
+    return /unauthorized|invalid token|jwt|session/i.test(msg);
   };
-  const expire = async () => {
-    await supabase.auth.signOut();
-    setAuthError(true);
-    toast.error("Your session has expired. Please log in again.");
-    onClose();
-    navigate({ to: "/auth" });
+
+  // Always returns a fresh access token, refreshing if needed. Never signs out.
+  const freshToken = async (force = false) => {
+    const { data } = await supabase.auth.getSession();
+    const s = data.session;
+    if (!force && s && (s.expires_at ?? 0) * 1000 > Date.now() + 60_000) return s.access_token;
+    const { data: r } = await supabase.auth.refreshSession();
+    return r.session?.access_token ?? s?.access_token ?? null;
   };
 
   const submit = async () => {
     if (!card || !user || !m) return;
     setBusy(true);
-    setAuthError(false);
+    setAuthError(null);
     try {
-      // Make sure we have a valid, fresh session before calling the server.
-      const { data } = await supabase.auth.getSession();
-      const expiresSoon = !data.session || (data.session.expires_at ?? 0) * 1000 < Date.now() + 60_000;
-      if (expiresSoon) {
-        const { data: r, error } = await supabase.auth.refreshSession();
-        if (error || !r.session) { await expire(); return; }
-      }
-      const payload = { data: { cardId: card.id, method: m.id } };
+      let token = await freshToken();
+      if (!token) { setAuthError("Session expired. Please log in again."); return; }
       try {
-        setInvoice(await create(payload));
+        setInvoice(await create({ data: { cardId: card.id, method: m.id, accessToken: token } }));
       } catch (e) {
         if (!isAuthError(e)) throw e;
-        // Token rejected: refresh once and retry.
-        const { data: r, error } = await supabase.auth.refreshSession();
-        if (error || !r.session) { await expire(); return; }
-        try { setInvoice(await create(payload)); }
-        catch (e2) { if (isAuthError(e2)) { await expire(); return; } throw e2; }
+        console.warn("[checkout] auth rejected, retrying with refreshed token", e);
+        token = await freshToken(true);
+        if (!token) { setAuthError("Session expired. Please log in again."); return; }
+        try { setInvoice(await create({ data: { cardId: card.id, method: m.id, accessToken: token } })); }
+        catch (e2) {
+          if (isAuthError(e2)) { console.error("[checkout] auth failed after refresh", e2); setAuthError("Session expired. Please log in again."); return; }
+          throw e2;
+        }
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not create payment");
@@ -89,6 +88,12 @@ export function CheckoutDialog({ card, onClose }: { card: CardRow | null; onClos
               </Select>
             </div>
             <p className="text-sm text-muted-foreground">You'll see the wallet and exact amount, then paste your transaction hash for admin review.</p>
+            {authError && (
+              <div className="rounded border border-destructive/50 bg-destructive/10 p-3 text-sm space-y-2">
+                <p>{authError}</p>
+                <Button variant="outline" size="sm" onClick={() => { onClose(); navigate({ to: "/auth" }); }}>Log in</Button>
+              </div>
+            )}
             <Button variant="neon" className="w-full" disabled={busy || !m} onClick={submit}>{busy ? "Creating order…" : "Continue to payment"}</Button>
           </div>
         )}
