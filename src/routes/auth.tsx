@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { Layout } from "@/components/site/Layout";
+import { SectionSkeleton } from "@/components/site/LoadingSkeletons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,10 +31,10 @@ function AuthPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
 
-  useEffect(() => { if (user) navigate({ to: "/dashboard" }); }, [user, navigate]);
+  useEffect(() => { if (!loading && user) navigate({ to: "/dashboard", replace: true }); }, [user, loading, navigate]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,6 +57,18 @@ function AuthPage() {
     }
     setBusy(false);
   };
+
+  // Never flash the sign-in form at a signed-in user: wait for the (shared)
+  // session read to settle and show a skeleton in the form's place meanwhile.
+  if (loading || user) {
+    return (
+      <Layout>
+        <div className="mx-auto w-full max-w-md px-4 py-16">
+          <SectionSkeleton rows={2} label={loading ? "Checking your session" : "Taking you to your dashboard"} />
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Pencil, Plus, Trash2, Check, X, Search } from "lucide-react";
 import { Layout } from "@/components/site/Layout";
+import { SectionSkeleton } from "@/components/site/LoadingSkeletons";
 import { StatusBadge } from "@/components/site/StatusBadge";
 import { CardVisual, stockLabel, type CardRow } from "@/components/site/CardTile";
 import { Button } from "@/components/ui/button";
@@ -31,8 +32,16 @@ const explorerUrl = (method: string, txid: string) =>
   method === "USDT-SOLANA" ? `https://solscan.io/tx/${txid}` : `https://bscscan.com/tx/${txid}`;
 
 function Admin() {
-  const { isAdmin, loading } = useAuth();
-  if (loading) return <Layout><p className="p-12 font-mono text-muted-foreground">verifying access…</p></Layout>;
+  const { isAdmin, loading, roleLoading } = useAuth();
+  if (loading || roleLoading) {
+    return (
+      <Layout>
+        <div className="mx-auto max-w-7xl px-4 py-12">
+          <SectionSkeleton rows={4} label="Verifying admin access" />
+        </div>
+      </Layout>
+    );
+  }
   if (!isAdmin) return <Layout><p className="p-12 font-mono text-destructive">ACCESS DENIED — admin only.</p></Layout>;
   return (
     <Layout>

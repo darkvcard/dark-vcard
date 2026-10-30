@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   signOut: vi.fn(),
   createPayment: vi.fn(),
   navigate: vi.fn(),
+  authState: { user: { id: "user-1", email: "alice@example.com" } as { id: string; email: string } | null, isAdmin: false, loading: false, roleLoading: false },
 }));
 
 vi.mock("@/integrations/supabase/client", () => ({
@@ -15,7 +16,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 vi.mock("@/hooks/use-auth", () => ({
-  useAuth: () => ({ user: { id: "user-1", email: "alice@example.com" }, isAdmin: false, loading: false }),
+  useAuth: () => mocks.authState,
 }));
 
 vi.mock("@tanstack/react-start", () => ({
@@ -75,6 +76,19 @@ const clickContinue = () => fireEvent.click(screen.getByRole("button", { name: /
 describe("Checkout order creation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.authState.user = { id: "user-1", email: "alice@example.com" };
+    mocks.authState.loading = false;
+  });
+
+  it("shows a session skeleton instead of the sign-in prompt while auth resolves", () => {
+    mocks.authState.user = null;
+    mocks.authState.loading = true;
+
+    renderCheckout();
+
+    expect(screen.queryByText(/sign in to continue/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /continue to payment/i })).toBeNull();
+    expect(document.querySelector(".animate-pulse")).not.toBeNull();
   });
 
   it("reads the session right before the request and sends the access token as a Bearer header", async () => {

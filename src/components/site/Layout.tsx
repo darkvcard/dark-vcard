@@ -2,6 +2,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Send, MessageCircle, ShieldCheck } from "lucide-react";
 import { Brand } from "./Brand";
+import { NavAuthSkeleton, NavLinkSkeleton } from "./LoadingSkeletons";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
@@ -10,7 +11,7 @@ export const TELEGRAM_URL = "https://t.me/vcardbond";
 export const DISCORD_URL = "https://discord.gg/vcardbond";
 
 function Header() {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, loading } = useAuth();
   const navigate = useNavigate();
   const signOut = async () => {
     await supabase.auth.signOut();
@@ -24,11 +25,15 @@ function Header() {
         <nav className="hidden items-center gap-6 md:flex">
           <Link to="/" className={link} activeOptions={{ exact: true }} activeProps={{ className: "text-primary" }}>Home</Link>
           <Link to="/shop" className={link} activeProps={{ className: "text-primary" }}>Shop</Link>
-          {user && <Link to="/dashboard" className={link} activeProps={{ className: "text-primary" }}>Dashboard</Link>}
-          {isAdmin && <Link to="/admin" className={link} activeProps={{ className: "text-primary" }}>Admin</Link>}
+          {/* Reserve the link slot while the session resolves so nothing pops in. */}
+          {loading ? <NavLinkSkeleton /> : user && <Link to="/dashboard" className={link} activeProps={{ className: "text-primary" }}>Dashboard</Link>}
+          {/* Only rendered once the role lookup says this account is an admin. */}
+          {!loading && isAdmin && <Link to="/admin" className={link} activeProps={{ className: "text-primary" }}>Admin</Link>}
         </nav>
         <div className="flex items-center gap-2">
-          {user ? (
+          {loading ? (
+            <NavAuthSkeleton />
+          ) : user ? (
             <Button variant="terminal" size="sm" onClick={signOut}>Sign out</Button>
           ) : (
             <Button variant="neon" size="sm" asChild><Link to="/auth">Sign in</Link></Button>
@@ -37,8 +42,8 @@ function Header() {
       </div>
       <div className="flex justify-center gap-5 pb-2 md:hidden">
         <Link to="/shop" className={link}>Shop</Link>
-        {user && <Link to="/dashboard" className={link}>Dashboard</Link>}
-        {isAdmin && <Link to="/admin" className={link}>Admin</Link>}
+        {loading ? <NavLinkSkeleton /> : user && <Link to="/dashboard" className={link}>Dashboard</Link>}
+        {!loading && isAdmin && <Link to="/admin" className={link}>Admin</Link>}
       </div>
     </header>
   );

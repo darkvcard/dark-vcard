@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/site/Layout";
+import { SectionSkeleton } from "@/components/site/LoadingSkeletons";
 import { StatusBadge } from "@/components/site/StatusBadge";
 import { CardVisual } from "@/components/site/CardTile";
 import { Button } from "@/components/ui/button";
@@ -17,11 +18,11 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
 });
 
 function Dashboard() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const [paying, setPaying] = useState<Invoice | null>(null);
   const { data: orders = [], isLoading } = useQuery({
     queryKey: ["my-orders", user?.id],
-    enabled: !!user,
+    enabled: !loading && !!user,
     queryFn: async () => {
       if (!user) return [];
       const { data, error } = await supabase.from("orders").select("*, cards(*), payment_invoices(*)").eq("user_id", user.id).order("created_at", { ascending: false });
@@ -30,6 +31,19 @@ function Dashboard() {
     },
   });
   const owned = orders.filter((o) => o.status === "completed");
+
+  // Hold the page on a skeleton until the shared auth state is known, so the
+  // dashboard never renders its "no cards / no orders" state before the session
+  // (and then flip once the user arrives).
+  if (loading) {
+    return (
+      <Layout>
+        <div className="mx-auto max-w-7xl px-4 py-12">
+          <SectionSkeleton rows={4} label="Loading your dashboard" />
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>

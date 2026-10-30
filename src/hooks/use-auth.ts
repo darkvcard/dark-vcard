@@ -1,27 +1,15 @@
-import { useEffect, useState } from "react";
-import type { User } from "@supabase/supabase-js";
-import { supabase } from "@/integrations/supabase/client";
+import { useSyncExternalStore } from "react";
+import { getAuthServerSnapshot, getAuthSnapshot, subscribeToAuth } from "@/lib/auth-store";
 
+/**
+ * Reads the shared auth state (see `@/lib/auth-store`).
+ *
+ * Because the state is shared, navigating between pages keeps the user that was
+ * already resolved instead of falling back to `user: null` and flashing the
+ * signed-out UI. `loading` is only true until the session is read the first time;
+ * `roleLoading` is true while the admin role is still being resolved.
+ */
 export function useAuth() {
-  const [user, setUser] = useState<User | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const load = async (u: User | null) => {
-      setUser(u);
-      if (u) {
-        const { data } = await supabase.rpc("has_role", { _user_id: u.id, _role: "admin" });
-        setIsAdmin(!!data);
-      } else setIsAdmin(false);
-      setLoading(false);
-    };
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
-      setTimeout(() => load(s?.user ?? null), 0);
-    });
-    supabase.auth.getSession().then(({ data }) => load(data.session?.user ?? null));
-    return () => sub.subscription.unsubscribe();
-  }, []);
-
-  return { user, isAdmin, loading };
+  return useSyncExternalStore(subscribeToAuth, getAuthSnapshot, getAuthServerSnapshot);
 }
+
