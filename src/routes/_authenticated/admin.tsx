@@ -1,8 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Pencil, Plus, Trash2, Check, X } from "lucide-react";
+import { Pencil, Plus, Trash2, Check, X, Search } from "lucide-react";
 import { Layout } from "@/components/site/Layout";
 import { StatusBadge } from "@/components/site/StatusBadge";
 import { CardVisual, stockLabel, type CardRow } from "@/components/site/CardTile";
@@ -16,6 +17,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { cardsQuery } from "@/lib/cards";
+import { customerEmail, filterAdminOrders, type OrderStatusFilter } from "@/lib/admin-orders";
+import { adminUserEmails } from "@/lib/payment.functions";
 
 export const Route = createFileRoute("/_authenticated/admin")({
   head: () => ({ meta: [{ title: "Admin Panel — vCard" }, { name: "description", content: "Manage vCard inventory and payment verification." }, { property: "og:title", content: "Admin Panel — vCard" }, { property: "og:description", content: "Manage vCard inventory and payment verification." }, { property: "og:type", content: "website" }, { name: "twitter:card", content: "summary" }, { name: "robots", content: "noindex" }] }),
@@ -151,7 +154,9 @@ function CardsAdmin() {
 
 function OrdersAdmin() {
   const qc = useQueryClient();
-  const [filter, setFilter] = useState<"all" | "pending" | "pending_approval" | "completed" | "failed">("pending_approval");
+  const fetchEmails = useServerFn(adminUserEmails);
+  const [filter, setFilter] = useState<OrderStatusFilter>("pending_approval");
+  const [search, setSearch] = useState("");
   const [approving, setApproving] = useState<{ id: string; details: string } | null>(null);
   const { data: orders = [] } = useQuery({
     queryKey: ["admin-orders"],
@@ -161,7 +166,22 @@ function OrdersAdmin() {
       return data;
     },
   });
-  const shown = filter === "all" ? orders : orders.filter((o) => o.status === filter);
+  // Customer emails come from the admin-only server lookup, never from a public
+  // table read. If the lookup fails the orders still render without emails.
+  const { data: emails = {} } = useQuery({
+    queryKey: ["admin-user-emails"],
+    queryFn: async () => {
+      try {
+        return await fetchEmails();
+      } catch (error) {
+        console.error("[admin] customer email lookup failed", error);
+        return {};
+      }
+    },
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  const shown = filterAdminOrders(orders, { status: filter, search, emails });
 
   const resolve = async (id: string, approve: boolean, details?: string) => {
     const { error } = await supabase.rpc("resolve_payment", { p_order_id: id, p_approve: approve, ...(details ? { p_details: details } : {}) });
@@ -181,27 +201,46 @@ function OrdersAdmin() {
           <Button key={f} size="sm" variant={filter === f ? "neon" : "terminal"} onClick={() => setFilter(f)}>{f === "pending_approval" ? "to review" : f === "pending" ? "awaiting payment" : f}</Button>
         ))}
       </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative w-full max-w-sm">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <Input
+            className="pl-9 font-mono"
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by customer email or TXID"
+            aria-label="Search orders by customer email or TXID"
+          />
+        </div>
+        {search && <Button size="sm" variant="terminal" onClick={() => setSearch("")}>Clear</Button>}
+        <span className="font-mono text-xs text-muted-foreground">{shown.length} order{shown.length === 1 ? "" : "s"}</span>
+      </div>
       <div className="card-surface overflow-x-auto rounded-xl">
         <table className="w-full text-sm">
-          <thead className="font-mono text-xs uppercase text-muted-foreground"><tr className="border-b border-border">{["Date", "Card", "Amount", "Method", "TXID", "Status", ""].map((h, i) => <th key={i} className="p-3 text-left">{h}</th>)}</tr></thead>
+          <thead className="font-mono text-xs uppercase text-muted-foreground"><tr className="border-b border-border">{["Date", "Customer Email", "Card", "Amount", "Method", "TXID", "Status", ""].map((h, i) => <th key={i} className="p-3 text-left">{h}</th>)}</tr></thead>
           <tbody>
-            {shown.length === 0 && <tr><td colSpan={7} className="p-3 text-muted-foreground">No orders.</td></tr>}
-            {shown.map((o) => (
-              <tr key={o.id} className="border-b border-border/50">
-                <td className="p-3">{new Date(o.created_at).toLocaleString()}</td>
-                <td className="p-3">{o.cards?.card_name ?? "—"}</td>
-                <td className="p-3 font-mono">{o.payment_invoices ? `${o.payment_invoices.amount_display} USDT` : `$${Number(o.amount_usd ?? 0).toFixed(2)}`}</td>
-                <td className="p-3 font-mono">{o.crypto_method}</td>
-                <td className="max-w-[220px] break-all p-3 font-mono text-xs">{o.txid ? <a className="text-primary underline" target="_blank" rel="noreferrer" href={explorerUrl(o.crypto_method, o.txid)}>{o.txid}</a> : <span className="text-muted-foreground">Not submitted</span>}</td>
-                <td className="p-3"><StatusBadge status={o.status} /></td>
-                <td className="whitespace-nowrap p-3 text-right">
-                  {o.status !== "completed" && <div className="flex justify-end gap-2">
-                    <Button size="sm" variant="neon" onClick={() => setApproving({ id: o.id, details: o.delivery_details ?? "" })}><Check /> Approve Payment</Button>
-                    {o.status !== "failed" && <Button size="sm" variant="destructive" onClick={() => reject(o.id)}><X /> Reject Payment</Button>}
-                  </div>}
-                </td>
-              </tr>
-            ))}
+            {shown.length === 0 && <tr><td colSpan={8} className="p-3 text-muted-foreground">No orders.</td></tr>}
+            {shown.map((o) => {
+              const email = customerEmail(o, emails);
+              return (
+                <tr key={o.id} className="border-b border-border/50">
+                  <td className="p-3">{new Date(o.created_at).toLocaleString()}</td>
+                  <td className="max-w-[220px] break-all p-3 font-mono text-xs">{email ? <a className="text-primary underline" href={`mailto:${email}`}>{email}</a> : <span className="text-muted-foreground">{o.user_id}</span>}</td>
+                  <td className="p-3">{o.cards?.card_name ?? "—"}</td>
+                  <td className="p-3 font-mono">{o.payment_invoices ? `${o.payment_invoices.amount_display} USDT` : `$${Number(o.amount_usd ?? 0).toFixed(2)}`}</td>
+                  <td className="p-3 font-mono">{o.crypto_method}</td>
+                  <td className="max-w-[220px] break-all p-3 font-mono text-xs">{o.txid ? <a className="text-primary underline" target="_blank" rel="noreferrer" href={explorerUrl(o.crypto_method, o.txid)}>{o.txid}</a> : <span className="text-muted-foreground">Not submitted</span>}</td>
+                  <td className="p-3"><StatusBadge status={o.status} /></td>
+                  <td className="whitespace-nowrap p-3 text-right">
+                    {o.status !== "completed" && <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="neon" onClick={() => setApproving({ id: o.id, details: o.delivery_details ?? "" })}><Check /> Approve Payment</Button>
+                      {o.status !== "failed" && <Button size="sm" variant="destructive" onClick={() => reject(o.id)}><X /> Reject Payment</Button>}
+                    </div>}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

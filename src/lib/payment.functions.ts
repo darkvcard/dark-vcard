@@ -3,19 +3,20 @@ import { z } from "zod";
 import { requireUser } from "./require-user";
 import type { Invoice } from "./payment-types";
 
-// The access token is sent both in the Authorization header and in the body so
-// checkout never depends on a single transport for the session.
+// Authenticated server function: the browser sends the session access token as
+// `Authorization: Bearer <token>` right before the call and `requireUser`
+// verifies it with the auth server before any invoice is created.
 export const createPayment = createServerFn({ method: "POST" })
+  .middleware([requireUser])
   .inputValidator(z.object({
     cardId: z.string().uuid(),
     method: z.enum(["USDT-BEP20", "USDT-SOLANA"]),
-    accessToken: z.string().min(10).max(4096),
   }))
-  .handler(async ({ data }) => {
-    const { verifyAccessToken } = await import("./require-user.server");
-    const context = await verifyAccessToken(data.accessToken);
+  .handler(async ({ data, context }) => {
     console.log("[createPayment] start", { user: context.userId, card: data.cardId, method: data.method });
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    // `create_crypto_invoice` inserts the order with status 'pending' and the
+    // matching invoice in one transaction, so a failure never leaves a half order.
     const result = await supabaseAdmin.rpc("create_crypto_invoice", { p_user_id: context.userId, p_card_id: data.cardId, p_method: data.method });
     if (result.error) {
       console.error("[createPayment] failed", result.error.message);
