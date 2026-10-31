@@ -20,6 +20,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { cardsQuery } from "@/lib/cards";
 import { customerEmail, filterAdminOrders, type OrderStatusFilter } from "@/lib/admin-orders";
 import { adminUserEmails } from "@/lib/payment.functions";
+import { paymentMethodLabel } from "@/lib/payments";
 
 export const Route = createFileRoute("/_authenticated/admin")({
   head: () => ({ meta: [{ title: "Admin Panel — vCard" }, { name: "description", content: "Manage vCard inventory and payment verification." }, { property: "og:title", content: "Admin Panel — vCard" }, { property: "og:description", content: "Manage vCard inventory and payment verification." }, { property: "og:type", content: "website" }, { name: "twitter:card", content: "summary" }, { name: "robots", content: "noindex" }] }),
@@ -238,9 +239,9 @@ function OrdersAdmin() {
                   <td className="max-w-[220px] break-all p-3 font-mono text-xs">{email ? <a className="text-primary underline" href={`mailto:${email}`}>{email}</a> : <span className="text-muted-foreground">{o.user_id}</span>}</td>
                   <td className="p-3">{o.cards?.card_name ?? "—"}</td>
                   <td className="p-3 font-mono">{o.payment_invoices ? `${o.payment_invoices.amount_display} USDT` : `$${Number(o.amount_usd ?? 0).toFixed(2)}`}</td>
-                  <td className="p-3 font-mono">{o.crypto_method}</td>
+                  <td className="p-3 font-mono">{paymentMethodLabel(o.crypto_method)}</td>
                   <td className="max-w-[220px] break-all p-3 font-mono text-xs">{o.txid ? <a className="text-primary underline" target="_blank" rel="noreferrer" href={explorerUrl(o.crypto_method, o.txid)}>{o.txid}</a> : <span className="text-muted-foreground">Not submitted</span>}</td>
-                  <td className="p-3"><StatusBadge status={o.status} /></td>
+                  <td className="p-3"><StatusBadge status={o.status} txid={o.txid} /></td>
                   <td className="whitespace-nowrap p-3 text-right">
                     {o.status !== "completed" && <div className="flex justify-end gap-2">
                       <Button size="sm" variant="neon" onClick={() => setApproving({ id: o.id, details: o.delivery_details ?? "" })}><Check /> Approve Payment</Button>

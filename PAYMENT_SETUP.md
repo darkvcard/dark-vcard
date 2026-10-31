@@ -1,5 +1,16 @@
 # Crypto payment setup
 
+## Checkout (manual verification)
+
+1. The customer clicks **Buy now** and picks a network in the checkout modal: `USDT - BNB Smart Chain (BEP20)` or `USDT - Solana`.
+2. The modal shows that network's static deposit address (`0x35aec7E35F65ea227e49fDd321709D52Ada389E4` on BSC, `3mjR2gV3MJrudjus9yBuh3EtSMw6Ca5BVFcYiMDa1VjQ` on Solana) with a copy button and a QR code rendered by `qrcode.react`.
+3. After paying, the customer pastes the transaction hash (TXID) and presses **CONFIRM PAYMENT**.
+4. The browser inserts the order directly with the Supabase client into `public.orders` (`user_id`, `card_id`, `crypto_method`, `amount_usd`, `txid`, `status = 'pending'`). No server function, auth middleware or service-role key is involved, so a rejected session can never block checkout.
+5. The customer lands on `/dashboard`, where the order shows **Pending Verification** with its TXID and payment method.
+6. An admin opens **Admin → Orders**, sees the same TXID and method (with a BscScan/Solscan link) and presses **Approve Payment** to deliver the card (`resolve_payment` sets `status = 'completed'` and assigns a stored card unit).
+
+`drizzle/migrations/0004_manual_crypto_checkout.sql` supports this flow: it gives `transaction_hash` a default, keeps it in sync with `txid`, derives `amount_usd` from the product price, and re-grants `INSERT` on `orders` to `authenticated` with a row-level security policy that only allows a signed-in customer to insert their own `pending` order on a supported network with a TXID and no delivery details.
+
 USDT is accepted on BNB Smart Chain (BEP20) and Solana only. BSC uses canonical USDT with 18 decimals; Solana uses canonical USDT with 6 decimals.
 
 ## Credentials

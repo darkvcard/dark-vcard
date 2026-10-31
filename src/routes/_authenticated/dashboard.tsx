@@ -7,10 +7,7 @@ import { CardVisual } from "@/components/site/CardTile";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
-import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { WaitingForPayment } from "@/components/site/WaitingForPayment";
-import type { Invoice } from "@/lib/payment-types";
+import { paymentMethodLabel } from "@/lib/payments";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "My Dashboard — vCard" }, { name: "description", content: "Your purchased cards and crypto payment history." }, { property: "og:title", content: "My Dashboard — vCard" }, { property: "og:description", content: "Your purchased cards and crypto payment history." }, { property: "og:type", content: "website" }, { name: "twitter:card", content: "summary" }] }),
@@ -19,7 +16,6 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
 
 function Dashboard() {
   const { user, loading } = useAuth();
-  const [paying, setPaying] = useState<Invoice | null>(null);
   const { data: orders = [], isLoading } = useQuery({
     queryKey: ["my-orders", user?.id],
     enabled: !loading && !!user,
@@ -88,9 +84,9 @@ function Dashboard() {
                     <td className="p-3">{new Date(o.created_at).toLocaleDateString()}</td>
                     <td className="p-3">{o.cards?.card_name ?? "—"}</td>
                     <td className="p-3 font-mono">${Number(o.amount_usd ?? 0).toFixed(2)}</td>
-                    <td className="p-3 font-mono">{o.crypto_method}</td>
+                    <td className="p-3 font-mono">{paymentMethodLabel(o.crypto_method)}</td>
                     <td className="max-w-[160px] truncate p-3 font-mono text-xs">{o.txid ?? "Not submitted"}</td>
-                    <td className="p-3"><div className="flex flex-wrap items-center gap-2"><StatusBadge status={o.status} />{o.status === "pending" && o.payment_invoices && <Button size="sm" variant="terminal" onClick={() => setPaying(o.payment_invoices)}>Pay & submit TXID</Button>}</div></td>
+                    <td className="p-3"><StatusBadge status={o.status} txid={o.txid} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -98,7 +94,6 @@ function Dashboard() {
           </div>
         </section>
       </div>
-      <Dialog open={!!paying} onOpenChange={(open) => !open && setPaying(null)}><DialogContent className="max-h-[90dvh] overflow-y-auto"><DialogHeader><DialogTitle>Order payment</DialogTitle></DialogHeader>{paying && <WaitingForPayment invoice={paying} onDone={() => setPaying(null)} />}</DialogContent></Dialog>
     </Layout>
   );
 }

@@ -3,11 +3,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  getSession: vi.fn(),
-  refreshSession: vi.fn(),
-  signOut: vi.fn(),
-  createPayment: vi.fn(),
+  insert: vi.fn(),
+  from: vi.fn(),
+  writeText: vi.fn(),
   navigate: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastError: vi.fn(),
   authState: {
     user: { id: "user-1", email: "alice@example.com" } as { id: string; email: string } | null,
     isAdmin: false,
@@ -17,34 +18,27 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/integrations/supabase/client", () => ({
-  supabase: {
-    auth: {
-      getSession: mocks.getSession,
-      refreshSession: mocks.refreshSession,
-      signOut: mocks.signOut,
-    },
-  },
+  supabase: { from: mocks.from },
 }));
 
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => mocks.authState,
 }));
 
-vi.mock("@tanstack/react-start", () => ({
-  useServerFn: () => mocks.createPayment,
-}));
-
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => mocks.navigate,
 }));
 
-vi.mock("@/lib/payment.functions", () => ({
-  createPayment: vi.fn(),
-  adminUserEmails: vi.fn(),
+vi.mock("sonner", () => ({
+  toast: { success: mocks.toastSuccess, error: mocks.toastError },
 }));
 
 import { CheckoutDialog } from "@/components/site/CheckoutDialog";
 import type { CardRow } from "@/components/site/CardTile";
+
+const BEP20 = "0x35aec7E35F65ea227e49fDd321709D52Ada389E4";
+const SOLANA = "3mjR2gV3MJrudjus9yBuh3EtSMw6Ca5BVFcYiMDa1VjQ";
+const TXID = `0x${"a".repeat(64)}`;
 
 const card: CardRow = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -57,39 +51,135 @@ const card: CardRow = {
   created_at: new Date().toISOString(),
 };
 
-const invoice = {
-  order_id: "order-1",
-  user_id: "user-1",
-  method: "USDT-BEP20",
-  recipient: "0x35aec7E35F65ea227e49fDd321709D52Ada389E4",
-  amount_units: "56010000000000000000",
-  amount_display: "56.01",
-  memo: "order-1",
-  created_at: new Date().toISOString(),
-  expires_at: new Date().toISOString(),
-  verification_state: "pending",
-  transaction_ref: null,
-  paid_at: null,
-  last_checked_at: null,
-  last_error: null,
-  scan_cursor: null,
-};
+const onClose = vi.fn();
 
-const renderCheckout = () =>
+const renderCheckout = (c: CardRow | null = card) =>
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <CheckoutDialog card={card} onClose={() => {}} />
+      <CheckoutDialog card={c} onClose={onClose} />
     </QueryClientProvider>,
   );
 
-const clickContinue = () =>
-  fireEvent.click(screen.getByRole("button", { name: /continue to payment/i }));
+const addressInput = () => screen.getByLabelText(/wallet address/i) as HTMLInputElement;
 
-describe("Checkout order creation", () => {
+const typeTxid = (value: string) =>
+  fireEvent.change(screen.getByLabelText(/transaction hash/i), { target: { value } });
+
+const clickConfirm = () =>
+  fireEvent.click(screen.getByRole("button", { name: /confirm payment/i }));
+
+describe("Manual crypto checkout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.authState.user = { id: "user-1", email: "alice@example.com" };
     mocks.authState.loading = false;
+    mocks.from.mockReturnValue({ insert: mocks.insert });
+    mocks.insert.mockResolvedValue({ data: null, error: null });
+    mocks.writeText.mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: mocks.writeText },
+    });
+  });
+
+  it("shows the BEP20 wallet, the exact amount and a QR code for that address", () => {
+    renderCheckout();
+
+    expect(addressInput().value).toBe(BEP20);
+    expect(screen.getByTestId("checkout-amount")).toHaveTextContent(
+      "Please send exactly $55.00 worth of crypto to the address above.",
+    );
+    // The QR code is an inline SVG whose <title> names the address it encodes.
+    const qr = screen.getByTitle(`Wallet QR code for ${BEP20}`);
+    expect(qr.tagName.toLowerCase()).toBe("title");
+    expect(qr.closest("svg")).not.toBeNull();
+    expect(screen.getByRole("button", { name: /copy address/i })).toBeInTheDocument();
+  });
+
+  it("switches the wallet address and QR code when the Solana network is selected", async () => {
+    renderCheckout();
+
+    fireEvent.click(screen.getByLabelText(/crypto network/i));
+    fireEvent.click(await screen.findByRole("option", { name: /USDT - Solana/i }));
+
+    await waitFor(() => expect(addressInput().value).toBe(SOLANA));
+    expect(screen.getByTitle(`Wallet QR code for ${SOLANA}`).closest("svg")).not.toBeNull();
+    expect(screen.queryByTitle(`Wallet QR code for ${BEP20}`)).toBeNull();
+  });
+
+  it("copies the currently selected wallet address", async () => {
+    renderCheckout();
+
+    fireEvent.click(screen.getByRole("button", { name: /copy address/i }));
+
+    await waitFor(() => expect(mocks.writeText).toHaveBeenCalledWith(BEP20));
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Wallet address copied");
+  });
+
+  it("refuses to submit an empty TXID", async () => {
+    renderCheckout();
+
+    clickConfirm();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Paste your Transaction Hash (TXID) before confirming.",
+    );
+    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.navigate).not.toHaveBeenCalled();
+  });
+
+  it("inserts a pending order with the TXID and redirects to the dashboard", async () => {
+    renderCheckout();
+
+    typeTxid(`  ${TXID}  `);
+    clickConfirm();
+
+    await waitFor(() => expect(mocks.insert).toHaveBeenCalledTimes(1));
+    expect(mocks.from).toHaveBeenCalledWith("orders");
+    expect(mocks.insert).toHaveBeenCalledWith({
+      user_id: "user-1",
+      card_id: card.id,
+      crypto_method: "USDT-BEP20",
+      amount_usd: 55,
+      txid: TXID,
+      status: "pending",
+    });
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith({ to: "/dashboard" }));
+    expect(mocks.toastSuccess).toHaveBeenCalledWith(
+      "Payment submitted successfully! We will verify your TXID and deliver your card shortly.",
+    );
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("records the Solana method when that network is chosen", async () => {
+    renderCheckout();
+
+    fireEvent.click(screen.getByLabelText(/crypto network/i));
+    fireEvent.click(await screen.findByRole("option", { name: /USDT - Solana/i }));
+    await waitFor(() => expect(addressInput().value).toBe(SOLANA));
+    typeTxid(TXID);
+    clickConfirm();
+
+    await waitFor(() => expect(mocks.insert).toHaveBeenCalledTimes(1));
+    expect(mocks.insert.mock.calls[0]![0]).toMatchObject({
+      crypto_method: "USDT-SOLANA",
+      status: "pending",
+    });
+  });
+
+  it("reports a duplicate transaction hash instead of redirecting", async () => {
+    mocks.insert.mockResolvedValue({
+      data: null,
+      error: { code: "23505", message: "duplicate key value violates unique constraint" },
+    });
+    renderCheckout();
+
+    typeTxid(TXID);
+    clickConfirm();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/already submitted/i);
+    expect(mocks.navigate).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("shows a session skeleton instead of the sign-in prompt while auth resolves", () => {
@@ -99,121 +189,17 @@ describe("Checkout order creation", () => {
     renderCheckout();
 
     expect(screen.queryByText(/sign in to continue/i)).toBeNull();
-    expect(screen.queryByRole("button", { name: /continue to payment/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /confirm payment/i })).toBeNull();
     expect(document.querySelector(".animate-pulse")).not.toBeNull();
   });
 
-  it("reads the session right before the request and sends the access token as a Bearer header", async () => {
-    mocks.getSession.mockResolvedValue({
-      data: { session: { access_token: "token-123" } },
-      error: null,
-    });
-    mocks.createPayment.mockResolvedValue({ ok: true, invoice });
+  it("asks signed-out visitors to sign in", () => {
+    mocks.authState.user = null;
 
     renderCheckout();
-    clickContinue();
 
-    await waitFor(() => expect(mocks.createPayment).toHaveBeenCalledTimes(1));
-    expect(mocks.getSession).toHaveBeenCalledTimes(1);
-    expect(mocks.createPayment).toHaveBeenCalledWith({
-      data: { cardId: card.id, method: "USDT-BEP20" },
-      headers: { Authorization: "Bearer token-123" },
-    });
-    expect(await screen.findByText(/56\.01/)).toBeInTheDocument();
-    expect(mocks.signOut).not.toHaveBeenCalled();
-  });
-
-  it("shows a red payment error with the server's own reason without signing the user out", async () => {
-    mocks.getSession.mockResolvedValue({
-      data: { session: { access_token: "token-123" } },
-      error: null,
-    });
-    mocks.createPayment.mockRejectedValue(new Error("Card unavailable"));
-
-    renderCheckout();
-    clickContinue();
-
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Payment failed: Card unavailable");
-    expect(alert.className).toContain("destructive");
-    expect(mocks.signOut).not.toHaveBeenCalled();
-    expect(mocks.navigate).not.toHaveBeenCalled();
-  });
-
-  it("shows the returned failure details when the server function reports a config problem", async () => {
-    mocks.getSession.mockResolvedValue({
-      data: { session: { access_token: "token-123" } },
-      error: null,
-    });
-    mocks.createPayment.mockResolvedValue({
-      ok: false,
-      stage: "config",
-      message: "Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY.",
-      env: "SUPABASE_URL=set SUPABASE_SERVICE_ROLE_KEY=MISSING",
-    });
-
-    renderCheckout();
-    clickContinue();
-
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(
-      "Payment failed: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY.",
-    );
-    expect(alert).toHaveTextContent("stage: config");
-    expect(alert).toHaveTextContent("SUPABASE_SERVICE_ROLE_KEY=MISSING");
-  });
-
-  it("shows the database error code when the invoice RPC is rejected", async () => {
-    mocks.getSession.mockResolvedValue({
-      data: { session: { access_token: "token-123" } },
-      error: null,
-    });
-    mocks.createPayment.mockResolvedValue({
-      ok: false,
-      stage: "database",
-      message: "function public.create_crypto_invoice(uuid, uuid, text) does not exist",
-      code: "42883",
-    });
-
-    renderCheckout();
-    clickContinue();
-
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("does not exist");
-    expect(alert).toHaveTextContent("code: 42883");
-  });
-
-  it("never signs out when there is no usable session", async () => {
-    mocks.getSession.mockResolvedValue({ data: { session: null }, error: null });
-    mocks.refreshSession.mockResolvedValue({ data: { session: null }, error: null });
-
-    renderCheckout();
-    clickContinue();
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(/no active session/i);
-    expect(mocks.createPayment).not.toHaveBeenCalled();
-    expect(mocks.signOut).not.toHaveBeenCalled();
-  });
-
-  it("retries once with a refreshed token when the server rejects the first one", async () => {
-    mocks.getSession.mockResolvedValue({
-      data: { session: { access_token: "stale-token" } },
-      error: null,
-    });
-    mocks.refreshSession.mockResolvedValue({
-      data: { session: { access_token: "fresh-token" } },
-      error: null,
-    });
-    mocks.createPayment
-      .mockRejectedValueOnce(new Error("Unauthorized: session rejected"))
-      .mockResolvedValueOnce({ ok: true, invoice });
-
-    renderCheckout();
-    clickContinue();
-
-    await waitFor(() => expect(mocks.createPayment).toHaveBeenCalledTimes(2));
-    expect(mocks.createPayment.mock.calls[0]![0].headers.Authorization).toBe("Bearer stale-token");
-    expect(mocks.createPayment.mock.calls[1]![0].headers.Authorization).toBe("Bearer fresh-token");
-    expect(mocks.signOut).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /confirm payment/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /sign in to continue/i }));
+    expect(mocks.navigate).toHaveBeenCalledWith({ to: "/auth" });
   });
 });

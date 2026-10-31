@@ -111,7 +111,7 @@ export type Database = {
           delivery_details?: string | null
           id?: string
           status?: Database["public"]["Enums"]["order_status"]
-          transaction_hash: string
+          transaction_hash?: string
           txid?: string | null
           user_id: string
           wallet_address?: string | null

@@ -1,6 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
+import { useQueryClient } from "@tanstack/react-query";
+import { QRCodeSVG } from "qrcode.react";
+import { Copy } from "lucide-react";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -9,6 +12,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -20,118 +24,89 @@ import {
 } from "@/components/ui/select";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
-import { CRYPTO_METHODS, type PaymentMethod } from "@/lib/payments";
-import { createPayment } from "@/lib/payment.functions";
 import {
-  isAuthFailure,
-  paymentFailureHint,
-  paymentFailureTitle,
-  toPaymentFailure,
-} from "@/lib/payment-errors";
-import type { CreatePaymentResult, Invoice, PaymentFailure } from "@/lib/payment-types";
-import { WaitingForPayment } from "./WaitingForPayment";
+  CHECKOUT_NETWORKS,
+  DEFAULT_NETWORK_ID,
+  networkById,
+  orderInsertErrorMessage,
+  orderInsertPayload,
+  usdAmount,
+  validateTxid,
+} from "@/lib/checkout";
 import type { CardRow } from "./CardTile";
-
-// Shown when the browser itself has no usable session, so no request is sent.
-const NO_SESSION_FAILURE: PaymentFailure = {
-  stage: "auth",
-  message: "No active session found. Sign in again and retry.",
-};
 
 export function CheckoutDialog({ card, onClose }: { card: CardRow | null; onClose: () => void }) {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
-  const [method, setMethod] = useState<string>(CRYPTO_METHODS[0].id);
-  const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const qc = useQueryClient();
+  const [method, setMethod] = useState<string>(DEFAULT_NETWORK_ID);
+  const [txid, setTxid] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const create = useServerFn(createPayment);
-  const m = CRYPTO_METHODS.find((c) => c.id === method);
+  const network = networkById(method);
+  const amount = usdAmount(card?.price_in_usd);
+
+  // Reset the form whenever a different card (or no card) is opened, so a
+  // half-typed transaction hash never leaks into the next purchase.
+  useEffect(() => {
+    setTxid("");
+    setError(null);
+    setBusy(false);
+    setMethod(DEFAULT_NETWORK_ID);
+  }, [card?.id]);
+
   const close = () => {
-    setInvoice(null);
+    setTxid("");
+    setError(null);
     onClose();
   };
 
-  // Every payment failure is reported here with the cause the server supplied.
-  // The user is never signed out: a failed payment must not destroy a valid session.
-  const [paymentError, setPaymentError] = useState<PaymentFailure | null>(null);
-
-  // Reads the live session token at call time. `force` refreshes once, which is
-  // only used when the server rejected the token we just sent.
-  const currentAccessToken = async (force = false) => {
-    if (!force) {
-      const { data, error } = await supabase.auth.getSession();
-      if (error) console.warn("[checkout] getSession failed", error.message);
-      const token = data.session?.access_token;
-      if (token) return token;
-    }
-    const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
-    if (refreshError) console.warn("[checkout] refreshSession failed", refreshError.message);
-    return refreshed.session?.access_token ?? null;
-  };
-
-  const createInvoice = (token: string, cardId: string, methodId: PaymentMethod) =>
-    create({
-      data: { cardId, method: methodId },
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-  // The auth middleware runs before the handler, so a rejected session arrives as
-  // a throw while invoice/database problems arrive as `{ ok: false }`. Normalize
-  // both so the alert always shows the server's own reason.
-  const attempt = async (
-    token: string,
-    cardId: string,
-    methodId: PaymentMethod,
-  ): Promise<CreatePaymentResult> => {
+  const copyAddress = async () => {
     try {
-      return await createInvoice(token, cardId, methodId);
-    } catch (error) {
-      const failure = toPaymentFailure(error);
-      console.error("[checkout] payment request threw", failure);
-      return { ok: false, ...failure };
+      await navigator.clipboard.writeText(network.address);
+      toast.success("Wallet address copied");
+    } catch (e) {
+      console.warn("[checkout] clipboard write failed", e);
+      toast.error("Could not copy the address. Please select it manually.");
     }
   };
 
-  const submit = async () => {
-    if (!card || !m) return;
+  // Manual verification: the order is written with the transaction hash the
+  // customer pasted, and an admin approves it later. No server function runs
+  // here, so a rejected session can never block the purchase.
+  const confirmPayment = async () => {
+    if (!card || !user) return;
+    const invalid = validateTxid(txid);
+    if (invalid) {
+      setError(invalid);
+      toast.error(invalid);
+      return;
+    }
     setBusy(true);
-    setPaymentError(null);
-    try {
-      // Grab the session immediately before the request and send its access
-      // token as a Bearer token so the server function can authenticate it.
-      let token = await currentAccessToken();
-      if (!token) {
-        setPaymentError(NO_SESSION_FAILURE);
-        return;
-      }
-
-      let result = await attempt(token, card.id, m.id);
-      if (!result.ok && isAuthFailure(result)) {
-        // The token we sent was rejected: refresh once and retry with the new one.
-        console.warn("[checkout] token rejected, retrying with a refreshed session", result);
-        token = await currentAccessToken(true);
-        if (!token) {
-          setPaymentError(NO_SESSION_FAILURE);
-          return;
-        }
-        result = await attempt(token, card.id, m.id);
-      }
-
-      if (result.ok) {
-        setInvoice(result.invoice);
-        return;
-      }
-      console.error("[checkout] payment failed", result);
-      setPaymentError(result);
-    } catch (error) {
-      // Transport/serialization failure: still show what is known instead of a
-      // blanket "please try again".
-      const failure = toPaymentFailure(error);
-      console.error("[checkout] payment failed", failure);
-      setPaymentError(failure);
-    } finally {
-      setBusy(false);
+    setError(null);
+    const { error: insertError } = await supabase.from("orders").insert(
+      orderInsertPayload({
+        userId: user.id,
+        cardId: card.id,
+        method: network.id,
+        priceUsd: card.price_in_usd,
+        txid,
+      }),
+    );
+    setBusy(false);
+    if (insertError) {
+      const message = orderInsertErrorMessage(insertError);
+      console.error("[checkout] order insert failed", insertError);
+      setError(message);
+      toast.error(message);
+      return;
     }
+    await qc.invalidateQueries({ queryKey: ["my-orders"] });
+    toast.success(
+      "Payment submitted successfully! We will verify your TXID and deliver your card shortly.",
+    );
+    close();
+    navigate({ to: "/dashboard" });
   };
 
   return (
@@ -148,9 +123,7 @@ export function CheckoutDialog({ card, onClose }: { card: CardRow | null; onClos
             </span>
           </DialogDescription>
         </DialogHeader>
-        {invoice ? (
-          <WaitingForPayment invoice={invoice} onDone={close} />
-        ) : loading ? (
+        {loading ? (
           <div role="status" aria-busy="true" aria-live="polite" className="space-y-3 py-2">
             <span className="sr-only">Checking your session…</span>
             <Skeleton className="h-4 w-24" />
@@ -169,40 +142,100 @@ export function CheckoutDialog({ card, onClose }: { card: CardRow | null; onClos
         ) : (
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Pay with</Label>
+              <Label htmlFor="checkout-network">Crypto Network</Label>
               <Select value={method} onValueChange={setMethod}>
-                <SelectTrigger>
+                <SelectTrigger id="checkout-network" aria-label="Crypto Network">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {CRYPTO_METHODS.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.label}
+                  {CHECKOUT_NETWORKS.map((n) => (
+                    <SelectItem key={n.id} value={n.id}>
+                      {n.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <p className="text-sm text-muted-foreground">
-              You'll see the wallet and exact amount, then paste your transaction hash for admin
-              review.
+
+            <div className="space-y-2">
+              <Label htmlFor="checkout-address">Wallet Address</Label>
+              <div className="flex items-start gap-2">
+                <Input
+                  id="checkout-address"
+                  readOnly
+                  value={network.address}
+                  className="font-mono text-xs"
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+                <Button
+                  type="button"
+                  variant="terminal"
+                  size="sm"
+                  className="shrink-0"
+                  aria-label="Copy Address"
+                  title="Copy Address"
+                  onClick={copyAddress}
+                >
+                  <Copy /> Copy Address
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex flex-col items-center gap-2 rounded-lg border border-border bg-background/60 p-3">
+              <QRCodeSVG
+                value={network.address}
+                size={150}
+                marginSize={2}
+                title={`Wallet QR code for ${network.address}`}
+                className="rounded bg-white p-1"
+              />
+              <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                Scan to pay on {network.label}
+              </p>
+            </div>
+
+            <p className="text-sm text-muted-foreground" data-testid="checkout-amount">
+              Please send exactly{" "}
+              <span className="font-mono font-semibold text-neon">{amount}</span> worth of crypto to
+              the address above.
             </p>
-            {paymentError && (
-              <div
+
+            <div className="space-y-2 border-t border-border pt-4">
+              <Label htmlFor="checkout-txid">Paste your Transaction Hash (TXID) here</Label>
+              <Input
+                id="checkout-txid"
+                name="txid"
+                className="font-mono"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder={network.id === "USDT-SOLANA" ? "5VERv8NMvz…" : "0x…"}
+                value={txid}
+                onChange={(e) => {
+                  setTxid(e.target.value);
+                  if (error) setError(null);
+                }}
+                aria-invalid={!!error}
+                aria-describedby={error ? "checkout-error" : undefined}
+              />
+            </div>
+
+            {error && (
+              <p
+                id="checkout-error"
                 role="alert"
                 className="rounded border border-destructive bg-destructive/10 p-3 text-sm font-medium text-destructive"
               >
-                <p>{paymentFailureTitle(paymentError)}</p>
-                {paymentFailureHint(paymentError) && (
-                  <p className="mt-1 break-words font-mono text-[11px] font-normal opacity-80">
-                    {paymentFailureHint(paymentError)}
-                  </p>
-                )}
-              </div>
+                {error}
+              </p>
             )}
-            <Button variant="neon" className="w-full" disabled={busy || !m} onClick={submit}>
-              {busy ? "Creating order…" : "Continue to payment"}
+
+            <Button variant="neon" className="w-full" disabled={busy} onClick={confirmPayment}>
+              {busy ? "Submitting…" : "CONFIRM PAYMENT"}
             </Button>
+            <p className="text-xs text-muted-foreground">
+              Send USDT on {network.label.replace("USDT - ", "")} only. We verify every TXID by hand
+              before delivering your card.
+            </p>
           </div>
         )}
       </DialogContent>

@@ -21,4 +21,26 @@ if (typeof window !== "undefined") {
       dispatchEvent: () => false,
     }),
   });
+
+  // Radix Select (the checkout network dropdown) calls these DOM APIs, which
+  // jsdom does not implement.
+  const elementProto = window.Element.prototype as Element & {
+    hasPointerCapture?: () => boolean;
+    setPointerCapture?: () => void;
+    releasePointerCapture?: () => void;
+    scrollIntoView?: () => void;
+  };
+  elementProto.hasPointerCapture = () => false;
+  elementProto.setPointerCapture = () => {};
+  elementProto.releasePointerCapture = () => {};
+  elementProto.scrollIntoView = () => {};
+
+  Object.defineProperty(window, "ResizeObserver", {
+    writable: true,
+    value: class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  });
 }
